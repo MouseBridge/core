@@ -56,3 +56,8 @@ func (c *Conn) Close() error {
 func (c *Conn) RemoteAddr() net.Addr {
 	return c.raw.RemoteAddr()
 }
+
+// Raw returns the underlying net.Conn (needed for deadline control).
+func (c *Conn) Raw() net.Conn {
+	return c.raw
+}
