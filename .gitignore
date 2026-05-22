@@ -1,6 +1,6 @@
 # Binaries
-mousebridge
-mousebridge-*
+/mousebridge
+/mousebridge-*
 *.exe
 
 # Build output
