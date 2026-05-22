@@ -27,6 +27,20 @@ func ServeCmd() *cobra.Command {
 	return cmd
 }
 
+// stdinLines broadcasts each line typed in the terminal to all listeners.
+// This is needed because handleInbound runs in a goroutine and cannot read
+// stdin directly on macOS — the terminal is only attached to the main goroutine.
+var stdinLines = make(chan string, 4)
+
+func startStdinBroadcast() {
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			stdinLines <- strings.TrimSpace(scanner.Text())
+		}
+	}()
+}
+
 func runServe(cmd *cobra.Command, args []string) error {
 	cfg, err := loadConfig()
 	if err != nil {
@@ -36,6 +50,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if port == 0 {
 		port = cfg.Port
 	}
+
+	startStdinBroadcast()
 
 	sess := session.NewManager()
 	ctrl := sw.NewController("local")
@@ -103,17 +119,21 @@ func handleInbound(c *mnet.Conn, cfg *config.Config, sess *session.Manager, ctrl
 	}
 	resultCh := make(chan result, 2)
 
-	// Terminal: accept/reject from stdin
+	// Terminal: accept/reject from the main-goroutine stdin broadcast.
 	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			line := strings.TrimSpace(strings.ToUpper(scanner.Text()))
-			if line == "A" {
-				resultCh <- result{accepted: true}
-				return
-			}
-			if line == "R" {
-				resultCh <- result{accepted: false}
+		for {
+			select {
+			case line := <-stdinLines:
+				upper := strings.ToUpper(line)
+				if upper == "A" {
+					resultCh <- result{accepted: true}
+					return
+				}
+				if upper == "R" {
+					resultCh <- result{accepted: false}
+					return
+				}
+			case <-time.After(61 * time.Second):
 				return
 			}
 		}
