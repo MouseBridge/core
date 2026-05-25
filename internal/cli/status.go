@@ -29,7 +29,11 @@ func StatusCmd() *cobra.Command {
 						fmt.Println("No connected devices.")
 					}
 					for _, d := range ev.Devices {
-						fmt.Printf("  %s (%s)  avg_latency=%.1fms\n", d.Name, d.ID[:8], d.AvgLatencyMs)
+						id := d.ID
+						if len(id) > 8 {
+							id = id[:8]
+						}
+						fmt.Printf("  %s (%s)  avg_latency=%.1fms\n", d.Name, id, d.AvgLatencyMs)
 					}
 					return false
 				}

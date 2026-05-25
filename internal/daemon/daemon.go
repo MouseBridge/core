@@ -126,21 +126,25 @@ func (d *Daemon) cmdPairAccept() {
 		d.broadcast(Event{Event: "error", Msg: "no pending pair request"})
 		return
 	}
-	if err := d.pendingPair.Accept(); err != nil {
+	// Snapshot all fields before Accept() changes state and triggers the polling
+	// goroutine in handleInbound to clear pendingPair concurrently.
+	peerName := d.pendingPair.PeerName()
+	peerID := d.pendingPairID
+	conn := d.pendingConn
+	mgr := d.pendingPair
+
+	if err := mgr.Accept(); err != nil {
 		d.broadcast(Event{Event: "error", Msg: err.Error()})
 		return
 	}
-	_ = d.pendingConn.Send(event.Message{
+	_ = conn.Send(event.Message{
 		V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{},
 	})
-	peerName := d.pendingPair.PeerName()
-	d.broadcast(Event{Event: "paired", DeviceID: d.pendingPairID, Name: peerName})
-	log.Printf("[daemon] paired with %s (accept)", peerName)
-	conn := d.pendingConn
-	peerID := d.pendingPairID
 	d.pendingPair = nil
 	d.pendingConn = nil
 	d.pendingPairID = ""
+	d.broadcast(Event{Event: "paired", DeviceID: peerID, Name: peerName})
+	log.Printf("[daemon] paired with %s (accept)", peerName)
 	go d.runSlaveSession(conn, peerID, peerName)
 }
 
@@ -184,13 +188,18 @@ func (d *Daemon) cmdDisconnect(deviceID string) {
 
 // handleInbound is called by the TCP server for each incoming connection (slave role).
 func (d *Daemon) handleInbound(c *mnet.Conn) {
+	// adopted is set to true when the connection ownership is transferred to runSlaveSession.
+	// In that case the defer must not close c.
+	adopted := false
 	defer func() {
 		if d.pendingConn == c {
 			d.pendingConn = nil
 			d.pendingPair = nil
 			d.pendingPairID = ""
 		}
-		c.Close()
+		if !adopted {
+			c.Close()
+		}
 	}()
 	remote := c.RemoteAddr().String()
 
@@ -232,24 +241,45 @@ func (d *Daemon) handleInbound(c *mnet.Conn) {
 	d.broadcast(Event{Event: "pair_request", DeviceID: prPay.DeviceID, Name: prPay.Name, PIN: pin})
 	log.Printf("[daemon] pair_request from %s, PIN=%s", prPay.Name, pin)
 
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		state := mgr.State()
-		if state == pairing.StatePaired || state == pairing.StateRejected {
+	// confirmCh receives the PIN submitted by the host (via pair_confirm TCP message).
+	type confirmResult struct{ pin string }
+	confirmCh := make(chan confirmResult, 1)
+	go func() {
+		for {
+			msg, err := c.Recv()
+			if err != nil {
+				return
+			}
+			if msg.Type == event.TypePairConfirm {
+				var pay event.PairConfirmPayload
+				_ = event.DecodePayload(msg, &pay)
+				confirmCh <- confirmResult{pay.PIN}
+				return
+			}
+		}
+	}()
+
+	// Poll for CLI accept/reject (via cmdPairAccept/cmdPairReject) or host PIN.
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.After(60 * time.Second)
+	for {
+		select {
+		case <-timeout:
+			d.broadcast(Event{Event: "error", Msg: "pairing timed out"})
+			_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{}})
+			d.pendingPair = nil
+			d.pendingConn = nil
+			d.pendingPairID = ""
 			return
-		}
-		_ = c.Raw().SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-		msg, err := c.Recv()
-		_ = c.Raw().SetReadDeadline(time.Time{})
-		if err != nil {
-			continue
-		}
-		if msg.Type == event.TypePairConfirm {
-			var pay event.PairConfirmPayload
-			_ = event.DecodePayload(msg, &pay)
-			if err := mgr.ConfirmPIN(pay.PIN); err != nil {
+
+		case res := <-confirmCh:
+			if err := mgr.ConfirmPIN(res.pin); err != nil {
 				_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{}})
 				d.broadcast(Event{Event: "error", Msg: "wrong PIN"})
+				d.pendingPair = nil
+				d.pendingConn = nil
+				d.pendingPairID = ""
 				return
 			}
 			_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
@@ -257,15 +287,22 @@ func (d *Daemon) handleInbound(c *mnet.Conn) {
 			d.pendingPair = nil
 			d.pendingConn = nil
 			d.pendingPairID = ""
+			adopted = true
 			go d.runSlaveSession(c, prPay.DeviceID, prPay.Name)
 			return
+
+		case <-ticker.C:
+			state := mgr.State()
+			if state == pairing.StatePaired {
+				// cmdPairAccept took ownership and will start runSlaveSession.
+				adopted = true
+				return
+			}
+			if state == pairing.StateRejected {
+				return
+			}
 		}
 	}
-	d.broadcast(Event{Event: "error", Msg: "pairing timed out"})
-	_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{}})
-	d.pendingPair = nil
-	d.pendingConn = nil
-	d.pendingPairID = ""
 }
 
 // runHostSession runs after dialing a remote daemon (host role).
