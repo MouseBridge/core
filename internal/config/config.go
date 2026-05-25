@@ -19,6 +19,8 @@ type Config struct {
 	DeviceName         string  `json:"device_name"`
 	Hotkeys            Hotkeys `json:"hotkeys"`
 	TrustedDevicesFile string  `json:"trusted_devices_file"`
+	HTTPHost           string  `json:"http_host"`
+	HTTPPort           int     `json:"http_port"`
 }
 
 // Default returns a Config with sensible defaults.
@@ -32,6 +34,8 @@ func Default() *Config {
 			SwitchLeft:  "ctrl+alt+left",
 		},
 		TrustedDevicesFile: filepath.Join(home, ".mousebridge", "trusted.json"),
+		HTTPHost:           "127.0.0.1",
+		HTTPPort:           39173,
 	}
 }
 
