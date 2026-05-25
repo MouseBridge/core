@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"mousebridge/internal/config"
 	"mousebridge/internal/daemon"
+	"mousebridge/internal/httpapi"
 )
 
 func DaemonCmd() *cobra.Command {
@@ -42,6 +43,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		TCPPort:    port,
 		DeviceName: cfg.DeviceName,
 	})
+
+	httpHost := cfg.HTTPHost
+	if httpHost == "" {
+		httpHost = "127.0.0.1"
+	}
+	if cfg.HTTPPort != 0 {
+		d.SetHTTPServer(httpapi.New(d, httpHost, cfg.HTTPPort))
+		log.Printf("[daemon] HTTP API will listen on %s:%d", httpHost, cfg.HTTPPort)
+	}
 
 	if err := d.Start(); err != nil {
 		return err

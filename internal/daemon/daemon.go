@@ -19,6 +19,8 @@ type Options struct {
 	SocketPath string
 	TCPPort    int
 	DeviceName string
+	HTTPHost   string
+	HTTPPort   int
 }
 
 // Daemon owns all long-running state: TCP listener, IPC server, sessions.
@@ -41,6 +43,11 @@ type Daemon struct {
 
 	subsMu sync.RWMutex
 	subs   map[chan Event]struct{}
+
+	httpSrv interface {
+		Start() error
+		Stop()
+	}
 }
 
 // New creates a Daemon with the given options.
@@ -71,11 +78,19 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("daemon: ipc: %w", err)
 	}
 	log.Printf("[daemon] socket: %s", d.opts.SocketPath)
+	if d.httpSrv != nil {
+		if err := d.httpSrv.Start(); err != nil {
+			return fmt.Errorf("daemon: http: %w", err)
+		}
+	}
 	return nil
 }
 
 // Stop shuts down all listeners and closes active connections.
 func (d *Daemon) Stop() {
+	if d.httpSrv != nil {
+		d.httpSrv.Stop()
+	}
 	d.tcpSrv.Stop()
 	d.connsMu.Lock()
 	conns := d.conns
@@ -529,6 +544,14 @@ func (d *Daemon) runSlaveSession(c *mnet.Conn, peerID, peerName string) {
 			d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("recv %s latency=%.1fms", msg.Type, latency)})
 		}
 	}
+}
+
+// SetHTTPServer injects an HTTP server that will be started/stopped with the daemon.
+func (d *Daemon) SetHTTPServer(srv interface {
+	Start() error
+	Stop()
+}) {
+	d.httpSrv = srv
 }
 
 // HandleCommand is the public entry point for REST/UI callers.
