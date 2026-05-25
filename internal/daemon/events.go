@@ -2,7 +2,7 @@ package daemon
 
 // Command is sent by a CLI client to the daemon over Unix Socket.
 type Command struct {
-	Cmd      string `json:"cmd"`                 // "serve"|"connect"|"pair_accept"|"pair_reject"|"pair_pin"|"status"|"disconnect"
+	Cmd      string `json:"cmd"`                 // "serve"|"connect"|"pair_accept"|"pair_reject"|"pair_pin"|"status"|"disconnect"|"stop_serve"
 	IP       string `json:"ip,omitempty"`        // for "connect"
 	Port     int    `json:"port,omitempty"`      // for "connect"
 	PIN      string `json:"pin,omitempty"`       // for "pair_pin"

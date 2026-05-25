@@ -21,6 +21,8 @@ func main() {
 	root.AddCommand(cli.ConnectCmd())
 	root.AddCommand(cli.StatusCmd())
 	root.AddCommand(cli.PairCmd())
+	root.AddCommand(cli.DisconnectCmd())
+	root.AddCommand(cli.StopServeCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

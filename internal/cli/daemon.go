@@ -18,12 +18,16 @@ func DaemonCmd() *cobra.Command {
 		RunE:  runDaemon,
 	}
 	cmd.Flags().IntP("port", "p", 0, "TCP port (default: from config)")
+	cmd.Flags().Bool("serve", false, "start listening for incoming connections on startup")
+	cmd.Flags().StringArray("connect", nil, "connect to remote device IP on startup (repeatable)")
 	return cmd
 }
 
 func runDaemon(cmd *cobra.Command, args []string) error {
 	socketPath := socketFlag(cmd)
 	port, _ := cmd.Flags().GetInt("port")
+	doServe, _ := cmd.Flags().GetBool("serve")
+	connectIPs, _ := cmd.Flags().GetStringArray("connect")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -43,6 +47,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	log.Printf("[daemon] started — socket=%s port=%d device=%s", socketPath, port, cfg.DeviceName)
+
+	if doServe {
+		d.Serve(0)
+	}
+	for _, ip := range connectIPs {
+		go d.Connect(ip, 0)
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

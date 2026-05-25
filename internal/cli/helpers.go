@@ -11,22 +11,41 @@ import (
 	"mousebridge/internal/daemon"
 )
 
-const defaultSocketPath = "~/.mousebridge/mb.sock"
-
-// socketFlag returns the --socket flag value from the root command, expanding ~ if needed.
+// socketFlag returns the Unix socket path for this daemon instance.
+// --socket takes precedence; otherwise ~/.mousebridge/mb-<port>.sock
+// where port comes from --port flag or config default.
 func socketFlag(cmd *cobra.Command) string {
 	root := cmd.Root()
-	s, _ := root.PersistentFlags().GetString("socket")
-	if s == "" {
-		s = defaultSocketPath
+	if s, _ := root.PersistentFlags().GetString("socket"); s != "" {
+		if len(s) >= 2 && s[:2] == "~/" {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				return filepath.Join(home, s[2:])
+			}
+		}
+		return s
 	}
-	if len(s) >= 2 && s[:2] == "~/" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			s = filepath.Join(home, s[2:])
+
+	port := 0
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Flags().Lookup("port") != nil {
+			if v, err := c.Flags().GetInt("port"); err == nil && v != 0 {
+				port = v
+				break
+			}
 		}
 	}
-	return s
+	if port == 0 {
+		cfg, _ := loadConfig()
+		if cfg != nil {
+			port = cfg.Port
+		} else {
+			port = config.Default().Port
+		}
+	}
+
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".mousebridge", fmt.Sprintf("mb-%d.sock", port))
 }
 
 // printEvent formats and prints a daemon event to stdout.

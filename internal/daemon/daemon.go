@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"mousebridge/internal/config"
@@ -32,6 +33,9 @@ type Daemon struct {
 	pendingPair   *pairing.Manager
 	pendingPairID string
 	pendingConn   *mnet.Conn
+
+	connsMu sync.Mutex
+	conns   []*mnet.Conn
 }
 
 // New creates a Daemon with the given options.
@@ -63,10 +67,34 @@ func (d *Daemon) Start() error {
 	return nil
 }
 
-// Stop shuts down all listeners cleanly.
+// Stop shuts down all listeners and closes active connections.
 func (d *Daemon) Stop() {
 	d.tcpSrv.Stop()
+	d.connsMu.Lock()
+	conns := d.conns
+	d.conns = nil
+	d.connsMu.Unlock()
+	for _, c := range conns {
+		c.Close()
+	}
 	d.ipc.Stop()
+}
+
+func (d *Daemon) trackConn(c *mnet.Conn) {
+	d.connsMu.Lock()
+	d.conns = append(d.conns, c)
+	d.connsMu.Unlock()
+}
+
+func (d *Daemon) untrackConn(c *mnet.Conn) {
+	d.connsMu.Lock()
+	for i, v := range d.conns {
+		if v == c {
+			d.conns = append(d.conns[:i], d.conns[i+1:]...)
+			break
+		}
+	}
+	d.connsMu.Unlock()
 }
 
 // handleCommand processes one command from a CLI/UI client.
@@ -86,10 +114,19 @@ func (d *Daemon) handleCommand(cmd Command) {
 		d.cmdStatus()
 	case "disconnect":
 		d.cmdDisconnect(cmd.DeviceID)
+	case "stop_serve":
+		d.tcpSrv.Stop()
+		log.Println("[daemon] TCP listener stopped")
 	default:
 		d.broadcast(Event{Event: "error", Msg: fmt.Sprintf("unknown command: %s", cmd.Cmd)})
 	}
 }
+
+// Serve is the public entry point used by the daemon CLI flag --serve.
+func (d *Daemon) Serve(port int) { d.cmdServe(port) }
+
+// Connect is the public entry point used by the daemon CLI flag --connect.
+func (d *Daemon) Connect(ip string, port int) { d.cmdConnect(ip, port) }
 
 func (d *Daemon) cmdServe(overridePort int) {
 	port := d.cfg.Port
@@ -307,6 +344,8 @@ func (d *Daemon) handleInbound(c *mnet.Conn) {
 
 // runHostSession runs after dialing a remote daemon (host role).
 func (d *Daemon) runHostSession(c *mnet.Conn) {
+	d.trackConn(c)
+	defer d.untrackConn(c)
 	defer c.Close()
 
 	if err := c.Send(event.Message{
@@ -391,6 +430,9 @@ func (d *Daemon) runHostSession(c *mnet.Conn) {
 
 // runSlaveSession runs the event loop after pairing on the slave side.
 func (d *Daemon) runSlaveSession(c *mnet.Conn, peerID, peerName string) {
+	d.trackConn(c)
+	defer d.untrackConn(c)
+	defer c.Close()
 	d.sess.Add(peerID, peerName)
 	d.broadcast(Event{Event: "connected", DeviceID: peerID, Name: peerName, IP: c.RemoteAddr().String()})
 	log.Printf("[daemon] slave session started with %s", peerName)
