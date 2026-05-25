@@ -22,22 +22,22 @@ go build -o mousebridge ./cmd/mousebridge/
 
 ## 架构概览
 
-每台机器运行一个后台守护进程（`mousebridge daemon`），所有状态由守护进程持有。
-
-CLI 命令通过 Unix Socket 向守护进程发送指令并接收事件流：
+每台机器运行一个前台守护进程（`mousebridge daemon`），所有状态由守护进程持有。控制命令通过 Unix Socket 向守护进程发送指令后立即退出，日志由守护进程自己输出。
 
 ```
-mousebridge daemon          ← 守护进程（长驻）
+mousebridge daemon              ← 守护进程（前台阻塞，Ctrl+C 退出）
     │
-    ├── Unix Socket (~/.mousebridge/mb.sock)
+    ├── Unix Socket (~/.mousebridge/mb-<port>.sock)
     │       ↑
-    │   mousebridge serve / connect / status / pair
-    │   （薄客户端，发送命令、打印事件）
+    │   mousebridge serve / connect / disconnect / status / pair
+    │   （发完命令立即退出）
     │
-    └── TCP :39172
+    └── TCP :<port>
             ↕
     对端 mousebridge daemon（另一台机器）
 ```
+
+socket 路径按端口自动区分（`mb-39172.sock`），本地多进程测试时用不同 `-p` 即可让多个 daemon 共存。
 
 ---
 
@@ -48,156 +48,118 @@ mousebridge daemon          ← 守护进程（长驻）
 **机器 A（从机，接收控制）：**
 
 ```bash
-# 终端 1：启动守护进程
-./mousebridge daemon
-
-# 终端 2：开始监听 TCP 连接
-./mousebridge serve
+mousebridge daemon --serve
 ```
 
 **机器 B（主机，发送控制）：**
 
 ```bash
-# 终端 1：启动守护进程
-./mousebridge daemon
-
-# 终端 2：连接到机器 A
-./mousebridge connect <机器A的IP>
+mousebridge daemon --connect <机器A的IP>
 ```
 
-连接建立后，机器 B 会显示：
-```
-[pair] request from MachineA — PIN: 847291
-[pair] run: mousebridge pair accept  OR  mousebridge pair reject
-```
+连接建立后，两侧守护进程日志均显示配对请求：
 
-机器 A 同时也会看到相同的配对请求。
+```
+[daemon] pair_request from MachineA, PIN=847291
+```
 
 **在机器 A 上接受配对：**
 
 ```bash
-# 新开一个终端
-./mousebridge pair accept
+mousebridge pair accept
 ```
 
-配对完成后双方均显示：
+配对完成后双方守护进程均显示：
+
 ```
-[pair] paired with MachineA
-[conn] connected to MachineA (192.168.1.x:39172)
+[daemon] paired with MachineA (accept)
+[daemon] slave session started with MachineA
 ```
 
 ---
 
-### 单机测试（两个守护进程）
+### 运行时追加连接
 
-本地测试时可以用 `--socket` 指定不同的 socket 路径，让两个守护进程共存：
+daemon 已启动后，随时可以追加新的连接，不需要重启：
 
 ```bash
-# 守护进程 A（从机角色，端口 39172）
-./mousebridge daemon --socket /tmp/mb-a.sock --port 39172
+mousebridge connect 192.168.1.6    # 追加连接第二台设备
+mousebridge stop-serve             # 停止监听（不断开已有连接）
+mousebridge disconnect <device-id> # 断开某台设备
+mousebridge status                 # 查看当前连接
+```
 
-# 守护进程 B（主机角色，端口 39173）
-./mousebridge daemon --socket /tmp/mb-b.sock --port 39173
+---
 
-# 让 A 开始监听
-./mousebridge --socket /tmp/mb-a.sock serve
+### 本地双进程测试
 
-# 让 B 连接 A
-./mousebridge --socket /tmp/mb-b.sock connect 127.0.0.1 --port 39172
+```bash
+# 进程 A — 从机，端口 39172，socket = ~/.mousebridge/mb-39172.sock
+mousebridge daemon --serve -p 39172
+
+# 进程 B — 主机，端口 39173，socket = ~/.mousebridge/mb-39173.sock
+mousebridge daemon -p 39173
+
+# 让 B 连接 A（新终端执行）
+mousebridge connect 127.0.0.1 -p 39173
 
 # 在 A 侧接受配对
-./mousebridge --socket /tmp/mb-a.sock pair accept
+mousebridge pair accept -p 39172
 
-# 查看连接状态
-./mousebridge --socket /tmp/mb-a.sock status
-./mousebridge --socket /tmp/mb-b.sock status
+# 查看状态
+mousebridge status -p 39172
+mousebridge status -p 39173
 ```
 
 ---
 
 ## 命令参考
 
-所有命令都支持 `--socket` 全局标志，用于指定守护进程的 Unix Socket 路径（默认 `~/.mousebridge/mb.sock`）。
+所有命令支持 `-p <port>` 指定目标 daemon（通过 socket 路径匹配），`--socket <path>` 可直接覆盖 socket 路径。
 
 ### `mousebridge daemon`
 
-启动守护进程。守护进程持有所有 TCP 连接、配对状态和会话数据，其他命令通过 Unix Socket 与它通信。
+启动守护进程，前台阻塞。Ctrl+C 触发优雅关闭：停止监听、断开所有连接、删除 socket 文件。
 
 ```bash
-mousebridge daemon [--socket <path>] [--port <N>]
+mousebridge daemon [-p <port>] [--serve] [--connect <ip> ...]
 ```
 
 | 标志 | 说明 | 默认值 |
 |------|------|--------|
-| `--socket` | Unix Socket 路径 | `~/.mousebridge/mb.sock` |
-| `--port`, `-p` | TCP 监听端口 | 39172（来自配置文件） |
-
-按 `Ctrl+C` 正常退出，守护进程会关闭所有连接并删除 socket 文件。
-
----
+| `-p`, `--port` | TCP 端口，同时决定 socket 路径 | 39172 |
+| `--serve` | 启动后立即开始监听 | — |
+| `--connect <ip>` | 启动后立即连接，可重复多次 | — |
 
 ### `mousebridge serve`
 
-告诉守护进程开始监听 TCP 入站连接（从机角色）。命令保持运行并打印收到的所有事件，直到按 `Ctrl+C`。
-
-```bash
-mousebridge serve [--port <N>]
-```
-
----
+告诉 daemon 开始监听 TCP 入站连接（从机角色），发完命令立即退出。
 
 ### `mousebridge connect <ip>`
 
-告诉守护进程连接到指定 IP 上的另一个 MouseBridge 守护进程（主机角色）。命令保持运行并打印所有事件。
+告诉 daemon 连接到远端 daemon（主机角色），发完命令立即退出。可多次调用追加连接。
 
-```bash
-mousebridge connect 192.168.1.5 [--port <N>]
-```
+### `mousebridge stop-serve`
 
-| 标志 | 说明 | 默认值 |
-|------|------|--------|
-| `--port`, `-p` | 对端 TCP 端口 | 39172 |
+告诉 daemon 停止监听，已有连接不受影响。
 
----
+### `mousebridge disconnect <device-id>`
 
-### `mousebridge pair`
+告诉 daemon 断开指定设备。device-id 从 `status` 输出获取。
 
-管理配对请求。
+### `mousebridge pair accept|reject|pin`
 
-```bash
-mousebridge pair accept          # 接受当前待处理的配对请求
-mousebridge pair reject          # 拒绝当前待处理的配对请求
-mousebridge pair pin <PIN>       # 向对端提交 PIN 码（主机侧提交，跳过对端手动确认）
-```
-
-配对有两种完成方式：
-- **接受/拒绝**：从机侧运行 `pair accept`
-- **PIN 码**：主机侧运行 `pair pin <PIN>`（PIN 由从机显示）
-
-两种方式均可完成配对，哪种先完成即生效。
-
----
+管理配对请求。`accept`/`reject` 在从机侧执行，`pin <PIN>` 在主机侧执行。
 
 ### `mousebridge status`
 
-查询守护进程当前的连接状态。
-
-```bash
-mousebridge status
-```
-
-输出示例：
-```
-  MacBook-Pro          192.168.1.5  avg=1.2ms
-```
+查看当前连接设备列表及延迟统计。
 
 ---
 
 ## 配置文件
 
-配置文件路径：`~/.mousebridge/config.json`
-
-不存在时自动使用默认值，无需手动创建。
+路径：`~/.mousebridge/config.json`，不存在时自动使用默认值。
 
 ```json
 {
@@ -227,10 +189,11 @@ mousebridge status
 | 守护进程 + Unix Socket IPC | ✅ |
 | TCP 设备互联（JSON Lines 协议） | ✅ |
 | 配对：PIN 码 + 接受/拒绝 | ✅ |
-| 多客户端同时监听事件流 | ✅ |
-| 鼠标边界切换（事件转发，无注入） | ✅ |
+| 多设备同时连接 | ✅ |
+| 运行时追加/断开连接 | ✅ |
+| 本地多进程测试（按端口隔离） | ✅ |
 | 延迟统计（rolling 20 样本均值） | ✅ |
-| 快捷键切换（终端输入模拟） | ✅ |
+| 鼠标边界切换（事件转发，无注入） | ✅ |
 | 真实鼠标/键盘注入 | 🔜 Step 3 |
 | 图形界面 | 🔜 Step 2 |
 | 可信设备持久化 | 🔜 Step 2 |
@@ -239,5 +202,5 @@ mousebridge status
 
 ## 开发计划
 
-- **Step 2**：图形 UI，设备管理，布局配置。UI 通过同一个 Unix Socket 接入守护进程，无需修改协议。
+- **Step 2**：图形 UI，设备管理，布局配置。UI 通过同一 Unix Socket 接入守护进程，无需修改协议。
 - **Step 3**：macOS 真实输入注入（CGo + Accessibility API），替换当前的事件日志占位实现。
