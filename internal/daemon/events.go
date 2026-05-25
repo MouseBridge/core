@@ -18,7 +18,7 @@ type Event struct {
 	PIN     string         `json:"pin,omitempty"`     // for "pair_request"
 	IP      string         `json:"ip,omitempty"`      // for "connected"
 	Msg     string         `json:"msg,omitempty"`     // for "log" and "error"
-	Devices []DeviceStatus `json:"devices,omitempty"` // for "status"
+	Devices []DeviceStatus `json:"devices"` // for "status"
 }
 
 // DeviceStatus is included in "status" events.
