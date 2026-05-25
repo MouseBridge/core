@@ -531,6 +531,11 @@ func (d *Daemon) runSlaveSession(c *mnet.Conn, peerID, peerName string) {
 	}
 }
 
+// HandleCommand is the public entry point for REST/UI callers.
+func (d *Daemon) HandleCommand(cmd Command) {
+	d.handleCommand(cmd)
+}
+
 // Subscribe returns a channel that receives every broadcasted Event.
 // The caller must call Unsubscribe when done.
 func (d *Daemon) Subscribe() chan Event {
