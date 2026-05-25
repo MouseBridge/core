@@ -30,9 +30,11 @@ type Daemon struct {
 	sess   *session.Manager
 	ctrl   *sw.Controller
 
-	pendingPair   *pairing.Manager
-	pendingPairID string
-	pendingConn   *mnet.Conn
+	pairMu         sync.Mutex
+	pendingPair    *pairing.Manager // slave-side: waiting for accept/reject
+	pendingPairID  string
+	pendingConn    *mnet.Conn
+	pendingHostConn *mnet.Conn // host-side: waiting for PIN confirmation
 
 	connsMu sync.Mutex
 	conns   map[*mnet.Conn]string // conn → deviceID ("" while not yet paired)
@@ -171,16 +173,17 @@ func (d *Daemon) cmdConnect(ip string, port int) {
 }
 
 func (d *Daemon) cmdPairAccept() {
+	d.pairMu.Lock()
 	if d.pendingPair == nil {
+		d.pairMu.Unlock()
 		d.broadcast(Event{Event: "error", Msg: "no pending pair request"})
 		return
 	}
-	// Snapshot all fields before Accept() changes state and triggers the polling
-	// goroutine in handleInbound to clear pendingPair concurrently.
 	peerName := d.pendingPair.PeerName()
 	peerID := d.pendingPairID
 	conn := d.pendingConn
 	mgr := d.pendingPair
+	d.pairMu.Unlock()
 
 	if err := mgr.Accept(); err != nil {
 		d.broadcast(Event{Event: "error", Msg: err.Error()})
@@ -189,32 +192,52 @@ func (d *Daemon) cmdPairAccept() {
 	_ = conn.Send(event.Message{
 		V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{},
 	})
+	d.pairMu.Lock()
 	d.pendingPair = nil
 	d.pendingConn = nil
 	d.pendingPairID = ""
+	d.pairMu.Unlock()
 	d.broadcast(Event{Event: "paired", DeviceID: peerID, Name: peerName})
 	log.Printf("[daemon] paired with %s (accept)", peerName)
 	go d.runSlaveSession(conn, peerID, peerName)
 }
 
 func (d *Daemon) cmdPairReject() {
+	d.pairMu.Lock()
 	if d.pendingPair == nil {
+		d.pairMu.Unlock()
 		d.broadcast(Event{Event: "error", Msg: "no pending pair request"})
 		return
 	}
-	_ = d.pendingPair.Reject()
-	_ = d.pendingConn.Send(event.Message{
-		V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{},
-	})
-	d.broadcast(Event{Event: "log", Msg: "pairing rejected"})
-	d.pendingConn.Close()
+	mgr := d.pendingPair
+	conn := d.pendingConn
 	d.pendingPair = nil
 	d.pendingConn = nil
 	d.pendingPairID = ""
+	d.pairMu.Unlock()
+
+	_ = mgr.Reject()
+	_ = conn.Send(event.Message{
+		V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{},
+	})
+	d.broadcast(Event{Event: "log", Msg: "pairing rejected"})
+	conn.Close()
 }
 
 func (d *Daemon) cmdPairPIN(pin string) {
-	d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("pair_pin %s submitted", pin)})
+	d.pairMu.Lock()
+	conn := d.pendingHostConn
+	d.pairMu.Unlock()
+	if conn == nil {
+		d.broadcast(Event{Event: "error", Msg: "no pending pairing (host side)"})
+		return
+	}
+	if err := conn.Send(event.Message{
+		V: 1, Seq: 3, Type: event.TypePairConfirm, Ts: nowMs(),
+		Payload: event.PairConfirmPayload{PIN: pin},
+	}); err != nil {
+		d.broadcast(Event{Event: "error", Msg: "pair_pin send: " + err.Error()})
+	}
 }
 
 func (d *Daemon) cmdStatus() {
@@ -231,8 +254,9 @@ func (d *Daemon) cmdStatus() {
 }
 
 func (d *Daemon) cmdDisconnect(deviceID string) {
-	d.closeConnByDeviceID(deviceID) // closing the conn triggers runHostSession/runSlaveSession to broadcast disconnected
-	d.sess.Remove(deviceID)
+	// closing the conn causes runHostSession/runSlaveSession to detect the error,
+	// broadcast "disconnected", and call sess.Remove — no need to do it here.
+	d.closeConnByDeviceID(deviceID)
 }
 
 // handleInbound is called by the TCP server for each incoming connection (slave role).
@@ -241,11 +265,13 @@ func (d *Daemon) handleInbound(c *mnet.Conn) {
 	// In that case the defer must not close c.
 	adopted := false
 	defer func() {
+		d.pairMu.Lock()
 		if d.pendingConn == c {
 			d.pendingConn = nil
 			d.pendingPair = nil
 			d.pendingPairID = ""
 		}
+		d.pairMu.Unlock()
 		if !adopted {
 			c.Close()
 		}
@@ -279,9 +305,11 @@ func (d *Daemon) handleInbound(c *mnet.Conn) {
 		return
 	}
 
+	d.pairMu.Lock()
 	d.pendingPair = mgr
 	d.pendingPairID = prPay.DeviceID
 	d.pendingConn = c
+	d.pairMu.Unlock()
 
 	_ = c.Send(event.Message{
 		V: 1, Seq: 2, Type: event.TypePairPin, Ts: nowMs(),
@@ -317,25 +345,31 @@ func (d *Daemon) handleInbound(c *mnet.Conn) {
 		case <-timeout:
 			d.broadcast(Event{Event: "error", Msg: "pairing timed out"})
 			_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{}})
+			d.pairMu.Lock()
 			d.pendingPair = nil
 			d.pendingConn = nil
 			d.pendingPairID = ""
+			d.pairMu.Unlock()
 			return
 
 		case res := <-confirmCh:
 			if err := mgr.ConfirmPIN(res.pin); err != nil {
 				_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{}})
 				d.broadcast(Event{Event: "error", Msg: "wrong PIN"})
+				d.pairMu.Lock()
 				d.pendingPair = nil
 				d.pendingConn = nil
 				d.pendingPairID = ""
+				d.pairMu.Unlock()
 				return
 			}
 			_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
 			d.broadcast(Event{Event: "paired", DeviceID: prPay.DeviceID, Name: prPay.Name})
+			d.pairMu.Lock()
 			d.pendingPair = nil
 			d.pendingConn = nil
 			d.pendingPairID = ""
+			d.pairMu.Unlock()
 			adopted = true
 			go d.runSlaveSession(c, prPay.DeviceID, prPay.Name)
 			return
@@ -395,6 +429,17 @@ func (d *Daemon) runHostSession(c *mnet.Conn) {
 	_ = event.DecodePayload(pinMsg, &pinPay)
 	d.broadcast(Event{Event: "pair_request", DeviceID: remoteID, Name: remoteName, PIN: pinPay.PIN})
 	log.Printf("[daemon] remote PIN=%s (waiting for accept)", pinPay.PIN)
+
+	d.pairMu.Lock()
+	d.pendingHostConn = c
+	d.pairMu.Unlock()
+	defer func() {
+		d.pairMu.Lock()
+		if d.pendingHostConn == c {
+			d.pendingHostConn = nil
+		}
+		d.pairMu.Unlock()
+	}()
 
 	pairResult, err := c.Recv()
 	if err != nil {

@@ -22,7 +22,7 @@ func NewServer(handler ConnHandler) *Server {
 	return &Server{handler: handler}
 }
 
-// Listen starts accepting on the given port.
+// Listen starts accepting on the given port. Closes any existing listener first.
 func (s *Server) Listen(port int) error {
 	addr := fmt.Sprintf(":%d", port)
 	ln, err := net.Listen("tcp", addr)
@@ -30,8 +30,12 @@ func (s *Server) Listen(port int) error {
 		return fmt.Errorf("net: listen %s: %w", addr, err)
 	}
 	s.mu.Lock()
+	old := s.listener
 	s.listener = ln
 	s.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
 
 	go s.acceptLoop(ln)
 	return nil
