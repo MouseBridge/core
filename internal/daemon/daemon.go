@@ -38,6 +38,9 @@ type Daemon struct {
 
 	connsMu sync.Mutex
 	conns   map[*mnet.Conn]string // conn → deviceID ("" while not yet paired)
+
+	subsMu sync.RWMutex
+	subs   map[chan Event]struct{}
 }
 
 // New creates a Daemon with the given options.
@@ -55,6 +58,7 @@ func New(opts Options) *Daemon {
 		sess:  session.NewManager(),
 		ctrl:  sw.NewController("local"),
 		conns: make(map[*mnet.Conn]string),
+		subs:  make(map[chan Event]struct{}),
 	}
 	d.ipc = NewIPCServer(opts.SocketPath, d.handleCommand)
 	d.tcpSrv = mnet.NewServer(d.handleInbound)
@@ -527,8 +531,40 @@ func (d *Daemon) runSlaveSession(c *mnet.Conn, peerID, peerName string) {
 	}
 }
 
+// Subscribe returns a channel that receives every broadcasted Event.
+// The caller must call Unsubscribe when done.
+func (d *Daemon) Subscribe() chan Event {
+	ch := make(chan Event, 64)
+	d.subsMu.Lock()
+	d.subs[ch] = struct{}{}
+	d.subsMu.Unlock()
+	return ch
+}
+
+// Unsubscribe removes the channel from the subscriber set and closes it.
+func (d *Daemon) Unsubscribe(ch chan Event) {
+	d.subsMu.Lock()
+	delete(d.subs, ch)
+	d.subsMu.Unlock()
+	close(ch)
+}
+
 func (d *Daemon) broadcast(ev Event) {
 	d.ipc.Broadcast(ev)
+
+	d.subsMu.RLock()
+	subs := make([]chan Event, 0, len(d.subs))
+	for ch := range d.subs {
+		subs = append(subs, ch)
+	}
+	d.subsMu.RUnlock()
+
+	for _, ch := range subs {
+		select {
+		case ch <- ev:
+		default: // drop if subscriber is slow
+		}
+	}
 }
 
 func nowMs() int64 {
