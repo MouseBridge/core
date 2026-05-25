@@ -8,7 +8,7 @@ import (
 )
 
 func StatusCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show daemon connection status",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -41,4 +41,6 @@ func StatusCmd() *cobra.Command {
 			})
 		},
 	}
+	cmd.Flags().IntP("port", "p", 0, "TCP port of target daemon (default: from config)")
+	return cmd
 }

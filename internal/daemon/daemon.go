@@ -35,7 +35,7 @@ type Daemon struct {
 	pendingConn   *mnet.Conn
 
 	connsMu sync.Mutex
-	conns   []*mnet.Conn
+	conns   map[*mnet.Conn]string // conn → deviceID ("" while not yet paired)
 }
 
 // New creates a Daemon with the given options.
@@ -48,10 +48,11 @@ func New(opts Options) *Daemon {
 		cfg.Port = opts.TCPPort
 	}
 	d := &Daemon{
-		opts: opts,
-		cfg:  cfg,
-		sess: session.NewManager(),
-		ctrl: sw.NewController("local"),
+		opts:  opts,
+		cfg:   cfg,
+		sess:  session.NewManager(),
+		ctrl:  sw.NewController("local"),
+		conns: make(map[*mnet.Conn]string),
 	}
 	d.ipc = NewIPCServer(opts.SocketPath, d.handleCommand)
 	d.tcpSrv = mnet.NewServer(d.handleInbound)
@@ -72,29 +73,40 @@ func (d *Daemon) Stop() {
 	d.tcpSrv.Stop()
 	d.connsMu.Lock()
 	conns := d.conns
-	d.conns = nil
+	d.conns = make(map[*mnet.Conn]string)
 	d.connsMu.Unlock()
-	for _, c := range conns {
+	for c := range conns {
 		c.Close()
 	}
 	d.ipc.Stop()
 }
 
-func (d *Daemon) trackConn(c *mnet.Conn) {
+func (d *Daemon) trackConn(c *mnet.Conn, deviceID string) {
 	d.connsMu.Lock()
-	d.conns = append(d.conns, c)
+	d.conns[c] = deviceID
 	d.connsMu.Unlock()
 }
 
 func (d *Daemon) untrackConn(c *mnet.Conn) {
 	d.connsMu.Lock()
-	for i, v := range d.conns {
-		if v == c {
-			d.conns = append(d.conns[:i], d.conns[i+1:]...)
+	delete(d.conns, c)
+	d.connsMu.Unlock()
+}
+
+// closeConnByDeviceID finds and closes the TCP connection for a given deviceID.
+func (d *Daemon) closeConnByDeviceID(deviceID string) {
+	d.connsMu.Lock()
+	var target *mnet.Conn
+	for c, id := range d.conns {
+		if id == deviceID {
+			target = c
 			break
 		}
 	}
 	d.connsMu.Unlock()
+	if target != nil {
+		target.Close()
+	}
 }
 
 // handleCommand processes one command from a CLI/UI client.
@@ -219,8 +231,8 @@ func (d *Daemon) cmdStatus() {
 }
 
 func (d *Daemon) cmdDisconnect(deviceID string) {
+	d.closeConnByDeviceID(deviceID) // closing the conn triggers runHostSession/runSlaveSession to broadcast disconnected
 	d.sess.Remove(deviceID)
-	d.broadcast(Event{Event: "disconnected", DeviceID: deviceID})
 }
 
 // handleInbound is called by the TCP server for each incoming connection (slave role).
@@ -344,7 +356,7 @@ func (d *Daemon) handleInbound(c *mnet.Conn) {
 
 // runHostSession runs after dialing a remote daemon (host role).
 func (d *Daemon) runHostSession(c *mnet.Conn) {
-	d.trackConn(c)
+	d.trackConn(c, "") // deviceID unknown until handshake
 	defer d.untrackConn(c)
 	defer c.Close()
 
@@ -364,6 +376,7 @@ func (d *Daemon) runHostSession(c *mnet.Conn) {
 	_ = event.DecodePayload(hsReply, &hsPay)
 	remoteName := hsPay.Name
 	remoteID := hsPay.DeviceID
+	d.trackConn(c, remoteID) // now we know the deviceID
 
 	if err := c.Send(event.Message{
 		V: 1, Seq: 2, Type: event.TypePairRequest, Ts: nowMs(),
@@ -430,7 +443,7 @@ func (d *Daemon) runHostSession(c *mnet.Conn) {
 
 // runSlaveSession runs the event loop after pairing on the slave side.
 func (d *Daemon) runSlaveSession(c *mnet.Conn, peerID, peerName string) {
-	d.trackConn(c)
+	d.trackConn(c, peerID)
 	defer d.untrackConn(c)
 	defer c.Close()
 	d.sess.Add(peerID, peerName)

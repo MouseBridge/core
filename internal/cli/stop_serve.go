@@ -6,7 +6,7 @@ import (
 )
 
 func StopServeCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "stop-serve",
 		Short: "Tell daemon to stop listening for incoming connections",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -18,4 +18,6 @@ func StopServeCmd() *cobra.Command {
 			return daemon.SendCommand(conn, daemon.Command{Cmd: "stop_serve"})
 		},
 	}
+	cmd.Flags().IntP("port", "p", 0, "TCP port of target daemon (default: from config)")
+	return cmd
 }

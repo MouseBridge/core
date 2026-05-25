@@ -10,6 +10,7 @@ func PairCmd() *cobra.Command {
 		Use:   "pair",
 		Short: "Manage pairing with a remote device",
 	}
+	cmd.PersistentFlags().IntP("port", "p", 0, "TCP port of target daemon (default: from config)")
 	cmd.AddCommand(pairAcceptCmd())
 	cmd.AddCommand(pairRejectCmd())
 	cmd.AddCommand(pairPINCmd())

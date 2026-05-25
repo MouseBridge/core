@@ -6,7 +6,7 @@ import (
 )
 
 func DisconnectCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "disconnect <device-id>",
 		Short: "Tell daemon to disconnect a device",
 		Args:  cobra.ExactArgs(1),
@@ -19,4 +19,6 @@ func DisconnectCmd() *cobra.Command {
 			return daemon.SendCommand(conn, daemon.Command{Cmd: "disconnect", DeviceID: args[0]})
 		},
 	}
+	cmd.Flags().IntP("port", "p", 0, "TCP port of target daemon (default: from config)")
+	return cmd
 }
