@@ -21,12 +21,14 @@ type Options struct {
 	DeviceName string
 	HTTPHost   string
 	HTTPPort   int
+	ConfigPath string
 }
 
 // Daemon owns all long-running state: TCP listener, IPC server, sessions.
 type Daemon struct {
-	opts   Options
-	cfg    *config.Config
+	opts       Options
+	configPath string
+	cfg        *config.Config
 	ipc    *IPCServer
 	tcpSrv *mnet.Server
 	sess   *session.Manager
@@ -60,8 +62,9 @@ func New(opts Options) *Daemon {
 		cfg.Port = opts.TCPPort
 	}
 	d := &Daemon{
-		opts:  opts,
-		cfg:   cfg,
+		opts:       opts,
+		configPath: opts.ConfigPath,
+		cfg:        cfg,
 		sess:  session.NewManager(),
 		ctrl:  sw.NewController("local"),
 		conns: make(map[*mnet.Conn]string),
@@ -593,6 +596,20 @@ func (d *Daemon) broadcast(ev Event) {
 		default: // drop if subscriber is slow
 		}
 	}
+}
+
+// Config returns the daemon's current configuration.
+func (d *Daemon) Config() *config.Config {
+	return d.cfg
+}
+
+// UpdateHotkeys replaces the hotkey config and saves to disk if configPath is set.
+func (d *Daemon) UpdateHotkeys(h config.Hotkeys) error {
+	d.cfg.Hotkeys = h
+	if d.configPath != "" {
+		return d.cfg.Save(d.configPath)
+	}
+	return nil
 }
 
 func nowMs() int64 {
