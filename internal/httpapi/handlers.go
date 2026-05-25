@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"mousebridge/internal/daemon"
+	"github.com/mousebridge/core/internal/daemon"
 )
 
 func writeJSON(w http.ResponseWriter, v any) {

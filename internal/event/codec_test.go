@@ -3,7 +3,7 @@ package event_test
 import (
 	"testing"
 
-	"mousebridge/internal/event"
+	"github.com/mousebridge/core/internal/event"
 )
 
 func TestEncodeDecodeMouseMove(t *testing.T) {

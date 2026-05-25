@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"mousebridge/internal/daemon"
-	"mousebridge/internal/httpapi"
+	"github.com/mousebridge/core/internal/daemon"
+	"github.com/mousebridge/core/internal/httpapi"
 )
 
 func newTestDaemon(t *testing.T, port int) *daemon.Daemon {

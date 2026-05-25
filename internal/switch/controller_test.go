@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	sw "mousebridge/internal/switch"
+	sw "github.com/mousebridge/core/internal/switch"
 )
 
 func TestControllerDefaultTargetIsLocal(t *testing.T) {

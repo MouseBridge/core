@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"mousebridge/internal/daemon"
+	"github.com/mousebridge/core/internal/daemon"
 )
 
 func TestEncodeCommand(t *testing.T) {

@@ -2,7 +2,7 @@ package cli
 
 import (
 	"github.com/spf13/cobra"
-	"mousebridge/internal/daemon"
+	"github.com/mousebridge/core/internal/daemon"
 )
 
 func DisconnectCmd() *cobra.Command {

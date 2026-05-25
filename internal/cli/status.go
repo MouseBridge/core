@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"mousebridge/internal/daemon"
+	"github.com/mousebridge/core/internal/daemon"
 )
 
 func StatusCmd() *cobra.Command {

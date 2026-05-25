@@ -4,8 +4,8 @@ import (
 	"net"
 	"testing"
 
-	"mousebridge/internal/event"
-	mnet "mousebridge/internal/net"
+	"github.com/mousebridge/core/internal/event"
+	mnet "github.com/mousebridge/core/internal/net"
 )
 
 func TestConnSendReceive(t *testing.T) {

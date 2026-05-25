@@ -6,7 +6,7 @@ import (
 	"net"
 	"sync"
 
-	"mousebridge/internal/event"
+	"github.com/mousebridge/core/internal/event"
 )
 
 // Conn wraps a net.Conn with JSON Lines framing.

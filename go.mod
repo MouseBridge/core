@@ -1,4 +1,4 @@
-module mousebridge
+module github.com/mousebridge/core
 
 go 1.26.2
 

@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"mousebridge/internal/daemon"
+	"github.com/mousebridge/core/internal/daemon"
 )
 
 // handleSSE streams daemon events to the client as Server-Sent Events.

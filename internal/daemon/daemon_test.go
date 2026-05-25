@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"mousebridge/internal/daemon"
+	"github.com/mousebridge/core/internal/daemon"
 )
 
 func TestDaemonStartStop(t *testing.T) {

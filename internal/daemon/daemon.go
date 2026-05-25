@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"mousebridge/internal/config"
-	"mousebridge/internal/event"
-	mnet "mousebridge/internal/net"
-	"mousebridge/internal/pairing"
-	"mousebridge/internal/session"
-	sw "mousebridge/internal/switch"
+	"github.com/mousebridge/core/internal/config"
+	"github.com/mousebridge/core/internal/event"
+	mnet "github.com/mousebridge/core/internal/net"
+	"github.com/mousebridge/core/internal/pairing"
+	"github.com/mousebridge/core/internal/session"
+	sw "github.com/mousebridge/core/internal/switch"
 )
 
 // Options configures the daemon.

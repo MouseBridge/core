@@ -2,7 +2,7 @@
 // Nothing in this package is used by the CLI — it is reserved for Step 2.
 package ipc
 
-import "mousebridge/internal/session"
+import "github.com/mousebridge/core/internal/session"
 
 // Handler receives runtime events from the core and surfaces them to a UI.
 // Step 2 will implement this over a Unix socket.

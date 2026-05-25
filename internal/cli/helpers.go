@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"mousebridge/internal/config"
-	"mousebridge/internal/daemon"
+	"github.com/mousebridge/core/internal/config"
+	"github.com/mousebridge/core/internal/daemon"
 )
 
 // socketFlag returns the Unix socket path for this daemon instance.

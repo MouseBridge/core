@@ -3,7 +3,7 @@ package pairing_test
 import (
 	"testing"
 
-	"mousebridge/internal/pairing"
+	"github.com/mousebridge/core/internal/pairing"
 )
 
 func TestPairingAcceptPath(t *testing.T) {

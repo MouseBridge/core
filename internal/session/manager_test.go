@@ -3,7 +3,7 @@ package session_test
 import (
 	"testing"
 
-	"mousebridge/internal/session"
+	"github.com/mousebridge/core/internal/session"
 )
 
 func TestAddRemoveDevice(t *testing.T) {

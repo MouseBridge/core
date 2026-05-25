@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mousebridge/internal/config"
+	"github.com/mousebridge/core/internal/config"
 )
 
 func TestDefaultConfig(t *testing.T) {

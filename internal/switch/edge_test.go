@@ -3,7 +3,7 @@ package switch__test
 import (
 	"testing"
 
-	sw "mousebridge/internal/switch"
+	sw "github.com/mousebridge/core/internal/switch"
 )
 
 func TestEdgeDetectRight(t *testing.T) {

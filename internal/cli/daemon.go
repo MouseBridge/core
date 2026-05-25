@@ -7,9 +7,9 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"mousebridge/internal/config"
-	"mousebridge/internal/daemon"
-	"mousebridge/internal/httpapi"
+	"github.com/mousebridge/core/internal/config"
+	"github.com/mousebridge/core/internal/daemon"
+	"github.com/mousebridge/core/internal/httpapi"
 )
 
 func DaemonCmd() *cobra.Command {

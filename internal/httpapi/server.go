@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"mousebridge/internal/daemon"
+	"github.com/mousebridge/core/internal/daemon"
 )
 
 // Server is an HTTP server that bridges the daemon to browser clients.

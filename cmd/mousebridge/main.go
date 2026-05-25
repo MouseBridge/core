@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"mousebridge/internal/cli"
+	"github.com/mousebridge/core/internal/cli"
 )
 
 func main() {
