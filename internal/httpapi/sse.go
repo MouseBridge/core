@@ -31,6 +31,10 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	log.Printf("httpapi: SSE client connected from %s", r.RemoteAddr)
 	defer log.Printf("httpapi: SSE client disconnected from %s", r.RemoteAddr)
 
+	// Send a comment immediately so EventSource.onopen fires reliably in all browsers.
+	fmt.Fprintf(w, ": connected\n\n")
+	flusher.Flush()
+
 	ctx := r.Context()
 	for {
 		select {

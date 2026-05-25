@@ -152,6 +152,7 @@ func (d *Daemon) handleCommand(cmd Command) {
 		d.cmdDisconnect(cmd.DeviceID)
 	case "stop_serve":
 		d.tcpSrv.Stop()
+		d.broadcast(Event{Event: "stopped"})
 		log.Println("[daemon] TCP listener stopped")
 	default:
 		d.broadcast(Event{Event: "error", Msg: fmt.Sprintf("unknown command: %s", cmd.Cmd)})
