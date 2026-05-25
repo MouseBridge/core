@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/daemon"
 )
 
@@ -164,5 +165,26 @@ func (h *sseHub) broadcast(ev daemon.Event) {
 		case ch <- ev:
 		default:
 		}
+	}
+}
+
+func (s *Server) handleShortcuts(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, s.d.Config().Hotkeys)
+	case http.MethodPut:
+		var h config.Hotkeys
+		if err := json.NewDecoder(r.Body).Decode(&h); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := s.d.UpdateHotkeys(h); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = s.shortcuts.Push(h)
+		writeJSON(w, map[string]string{"ok": "true"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }

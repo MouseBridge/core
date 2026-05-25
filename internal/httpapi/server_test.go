@@ -191,3 +191,70 @@ func TestCORSHeaders(t *testing.T) {
 		t.Fatalf("OPTIONS want 204, got %d", resp.StatusCode)
 	}
 }
+
+func TestRESTGetShortcuts(t *testing.T) {
+	d := newTestDaemon(t, 0)
+	srv := httpapi.New(d, "127.0.0.1", 39300)
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+
+	resp, err := http.Get("http://127.0.0.1:39300/api/shortcuts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := result["switch_next"]; !ok {
+		t.Fatal("response missing 'switch_next' key")
+	}
+}
+
+func TestRESTPutShortcuts(t *testing.T) {
+	d := newTestDaemon(t, 0)
+	srv := httpapi.New(d, "127.0.0.1", 39301)
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+
+	body := strings.NewReader(`{"switch_next":"ctrl+1","switch_prev":"ctrl+2","switch_to_host":"ctrl+0","disconnect_all":"","toggle_pause":""}`)
+	req, _ := http.NewRequest(http.MethodPut, "http://127.0.0.1:39301/api/shortcuts", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if d.Config().Hotkeys.SwitchNext != "ctrl+1" {
+		t.Fatalf("hotkey not updated, got %q", d.Config().Hotkeys.SwitchNext)
+	}
+}
+
+func TestRESTPutShortcutsWrongMethod(t *testing.T) {
+	d := newTestDaemon(t, 0)
+	srv := httpapi.New(d, "127.0.0.1", 39302)
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+
+	resp, err := http.Post("http://127.0.0.1:39302/api/shortcuts", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405, got %d", resp.StatusCode)
+	}
+}

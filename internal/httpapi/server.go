@@ -7,22 +7,25 @@ import (
 	"strconv"
 
 	"github.com/mousebridge/core/internal/daemon"
+	"github.com/mousebridge/core/internal/shortcuts"
 )
 
 // Server is an HTTP server that bridges the daemon to browser clients.
 type Server struct {
-	d    *daemon.Daemon
-	addr string
-	srv  *http.Server
-	hub  *sseHub
+	d         *daemon.Daemon
+	addr      string
+	srv       *http.Server
+	hub       *sseHub
+	shortcuts *shortcuts.Manager
 }
 
 // New creates a Server bound to host:port.
 func New(d *daemon.Daemon, host string, port int) *Server {
 	return &Server{
-		d:    d,
-		addr: net.JoinHostPort(host, strconv.Itoa(port)),
-		hub:  newSSEHub(),
+		d:         d,
+		addr:      net.JoinHostPort(host, strconv.Itoa(port)),
+		hub:       newSSEHub(),
+		shortcuts: shortcuts.New(),
 	}
 }
 
@@ -56,6 +59,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/pair/reject", s.handlePairReject)
 	mux.HandleFunc("/api/pair/pin", s.handlePairPIN)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/shortcuts", s.handleShortcuts)
 	mux.HandleFunc("/api/events", s.handleSSE)
 }
 
