@@ -41,6 +41,27 @@ func (s *Server) Listen(port int) error {
 	return nil
 }
 
+// IsListening reports whether the server is currently listening.
+func (s *Server) IsListening() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listener != nil
+}
+
+// Port returns the local port the server is listening on, or 0 if not listening.
+func (s *Server) Port() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.listener == nil {
+		return 0
+	}
+	addr, ok := s.listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0
+	}
+	return addr.Port
+}
+
 // Stop closes the listener.
 func (s *Server) Stop() {
 	s.mu.Lock()

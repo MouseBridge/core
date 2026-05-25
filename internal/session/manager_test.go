@@ -9,7 +9,7 @@ import (
 func TestAddRemoveDevice(t *testing.T) {
 	m := session.NewManager()
 
-	m.Add("dev-1", "MacBook-Pro")
+	m.Add("dev-1", "MacBook-Pro", "192.168.1.2")
 	devs := m.Devices()
 	if len(devs) != 1 {
 		t.Fatalf("want 1 device got %d", len(devs))
@@ -26,7 +26,7 @@ func TestAddRemoveDevice(t *testing.T) {
 
 func TestRecordLatency(t *testing.T) {
 	m := session.NewManager()
-	m.Add("dev-1", "MacBook-Pro")
+	m.Add("dev-1", "MacBook-Pro", "192.168.1.2")
 
 	m.RecordLatency("dev-1", 1.2)
 	m.RecordLatency("dev-1", 2.4)

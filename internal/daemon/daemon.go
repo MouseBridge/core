@@ -478,7 +478,7 @@ func (d *Daemon) runHostSession(c *mnet.Conn) {
 	}
 
 	d.broadcast(Event{Event: "paired", DeviceID: remoteID, Name: remoteName})
-	d.sess.Add(remoteID, remoteName)
+	d.sess.Add(remoteID, remoteName, c.RemoteAddr().String())
 	d.broadcast(Event{Event: "connected", DeviceID: remoteID, Name: remoteName, IP: c.RemoteAddr().String()})
 	log.Printf("[daemon] connected to %s (%s)", remoteName, c.RemoteAddr())
 
@@ -513,7 +513,7 @@ func (d *Daemon) runSlaveSession(c *mnet.Conn, peerID, peerName string) {
 	d.trackConn(c, peerID)
 	defer d.untrackConn(c)
 	defer c.Close()
-	d.sess.Add(peerID, peerName)
+	d.sess.Add(peerID, peerName, c.RemoteAddr().String())
 	d.broadcast(Event{Event: "connected", DeviceID: peerID, Name: peerName, IP: c.RemoteAddr().String()})
 	log.Printf("[daemon] slave session started with %s", peerName)
 
@@ -595,6 +595,32 @@ func (d *Daemon) broadcast(ev Event) {
 		case ch <- ev:
 		default: // drop if subscriber is slow
 		}
+	}
+}
+
+// DaemonState holds a snapshot of the daemon's current runtime state.
+type DaemonState struct {
+	Serving bool           `json:"serving"`
+	Port    int            `json:"port,omitempty"`
+	Devices []DeviceStatus `json:"devices"`
+}
+
+// State returns a consistent snapshot of the daemon's current state.
+func (d *Daemon) State() DaemonState {
+	devs := d.sess.Devices()
+	statuses := make([]DeviceStatus, 0, len(devs))
+	for _, dv := range devs {
+		statuses = append(statuses, DeviceStatus{
+			ID:           dv.ID,
+			Name:         dv.Name,
+			IP:           dv.IP,
+			AvgLatencyMs: dv.AvgLatencyMs,
+		})
+	}
+	return DaemonState{
+		Serving: d.tcpSrv.IsListening(),
+		Port:    d.tcpSrv.Port(),
+		Devices: statuses,
 	}
 }
 

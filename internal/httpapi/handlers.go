@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/daemon"
@@ -104,35 +103,12 @@ func (s *Server) handlePairPIN(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"ok": "true"})
 }
 
-// handleStatus subscribes to the daemon, sends a "status" command, waits for
-// the status event (max 2s), and returns the device list as JSON.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	ch := s.d.Subscribe()
-	defer s.d.Unsubscribe(ch)
-
-	s.d.HandleCommand(daemon.Command{Cmd: "status"})
-
-	timeout := time.After(2 * time.Second)
-	for {
-		select {
-		case ev := <-ch:
-			if ev.Event == "status" {
-				devices := ev.Devices
-				if devices == nil {
-					devices = []daemon.DeviceStatus{}
-				}
-				writeJSON(w, map[string]any{"devices": devices})
-				return
-			}
-		case <-timeout:
-			writeJSON(w, map[string]any{"devices": []daemon.DeviceStatus{}})
-			return
-		}
-	}
+	writeJSON(w, s.d.State())
 }
 
 // sseHub tracks SSE connections.

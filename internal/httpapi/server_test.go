@@ -113,6 +113,9 @@ func TestRESTStatus(t *testing.T) {
 	if _, ok := result["devices"]; !ok {
 		t.Fatal("response missing 'devices' key")
 	}
+	if _, ok := result["serving"]; !ok {
+		t.Fatal("response missing 'serving' key")
+	}
 }
 
 func TestSSEReceivesEvents(t *testing.T) {
@@ -147,13 +150,15 @@ func TestSSEReceivesEvents(t *testing.T) {
 	// wait for SSE connection to be established
 	time.Sleep(50 * time.Millisecond)
 
-	// trigger a status event via separate transport (no shared connection pool)
-	statusClient := &http.Client{Transport: &http.Transport{}}
-	statusResp, err := statusClient.Get("http://127.0.0.1:39296/api/status")
+	// trigger a listening event by calling serve
+	triggerClient := &http.Client{Transport: &http.Transport{}}
+	body := strings.NewReader(`{"port":39298}`)
+	triggerResp, err := triggerClient.Post("http://127.0.0.1:39296/api/serve", "application/json", body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	statusResp.Body.Close()
+	triggerResp.Body.Close()
+	defer triggerClient.Post("http://127.0.0.1:39296/api/stop-serve", "application/json", nil) //nolint
 
 	select {
 	case line := <-lines:

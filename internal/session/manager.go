@@ -6,6 +6,7 @@ import "sync"
 type DeviceInfo struct {
 	ID           string
 	Name         string
+	IP           string
 	AvgLatencyMs float64
 	latencies    []float64
 }
@@ -21,10 +22,10 @@ func NewManager() *Manager {
 }
 
 // Add registers a device as connected.
-func (m *Manager) Add(id, name string) {
+func (m *Manager) Add(id, name, ip string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.devices[id] = &DeviceInfo{ID: id, Name: name}
+	m.devices[id] = &DeviceInfo{ID: id, Name: name, IP: ip}
 }
 
 // Remove deregisters a device.
