@@ -10,7 +10,7 @@ type HotkeyListener struct {
 	stopCh   chan struct{}
 }
 
-func NewHotkeyListener(switchRight, switchLeft string, onSwitch func(direction string)) *HotkeyListener {
+func NewHotkeyListener(switchNext, switchPrev string, onSwitch func(direction string)) *HotkeyListener {
 	return &HotkeyListener{onSwitch: onSwitch, stopCh: make(chan struct{})}
 }
 

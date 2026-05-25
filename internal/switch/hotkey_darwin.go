@@ -13,25 +13,25 @@ import (
 // Step 1: terminal fallback — type "right" or "left" + Enter.
 // Step 3 will replace with real CGo-based global hotkey capture.
 type HotkeyListener struct {
-	switchRight string
-	switchLeft  string
-	onSwitch    func(direction string)
-	stopCh      chan struct{}
+	switchNext string
+	switchPrev string
+	onSwitch   func(direction string)
+	stopCh     chan struct{}
 }
 
-func NewHotkeyListener(switchRight, switchLeft string, onSwitch func(direction string)) *HotkeyListener {
+func NewHotkeyListener(switchNext, switchPrev string, onSwitch func(direction string)) *HotkeyListener {
 	return &HotkeyListener{
-		switchRight: switchRight,
-		switchLeft:  switchLeft,
-		onSwitch:    onSwitch,
-		stopCh:      make(chan struct{}),
+		switchNext: switchNext,
+		switchPrev: switchPrev,
+		onSwitch:   onSwitch,
+		stopCh:     make(chan struct{}),
 	}
 }
 
 // Start logs configured hotkeys and begins reading from stdin as a fallback.
 func (h *HotkeyListener) Start() {
-	log.Printf("[hotkey] switch_right=%s  switch_left=%s  (type 'right' or 'left' + Enter to switch)",
-		h.switchRight, h.switchLeft)
+	log.Printf("[hotkey] switch_next=%s  switch_prev=%s  (type 'right' or 'left' + Enter to switch)",
+		h.switchNext, h.switchPrev)
 	go h.stdinLoop()
 }
 

@@ -9,8 +9,11 @@ import (
 
 // Hotkeys holds configurable key bindings.
 type Hotkeys struct {
-	SwitchRight string `json:"switch_right"`
-	SwitchLeft  string `json:"switch_left"`
+	SwitchNext    string `json:"switch_next"`
+	SwitchPrev    string `json:"switch_prev"`
+	SwitchToHost  string `json:"switch_to_host"`
+	DisconnectAll string `json:"disconnect_all"`
+	TogglePause   string `json:"toggle_pause"`
 }
 
 // Config holds all user-configurable settings.
@@ -30,8 +33,9 @@ func Default() *Config {
 		Port:       39172,
 		DeviceName: hostname(),
 		Hotkeys: Hotkeys{
-			SwitchRight: "ctrl+alt+right",
-			SwitchLeft:  "ctrl+alt+left",
+			SwitchNext:   "ctrl+alt+right",
+			SwitchPrev:   "ctrl+alt+left",
+			SwitchToHost: "ctrl+alt+home",
 		},
 		TrustedDevicesFile: filepath.Join(home, ".mousebridge", "trusted.json"),
 		HTTPHost:           "127.0.0.1",

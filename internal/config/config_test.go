@@ -12,8 +12,20 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Port != 39172 {
 		t.Fatalf("default port: want 39172 got %d", cfg.Port)
 	}
-	if cfg.Hotkeys.SwitchRight != "ctrl+alt+right" {
-		t.Fatalf("default hotkey: %q", cfg.Hotkeys.SwitchRight)
+	if cfg.Hotkeys.SwitchNext != "ctrl+alt+right" {
+		t.Fatalf("default SwitchNext: %q", cfg.Hotkeys.SwitchNext)
+	}
+	if cfg.Hotkeys.SwitchPrev != "ctrl+alt+left" {
+		t.Fatalf("default SwitchPrev: %q", cfg.Hotkeys.SwitchPrev)
+	}
+	if cfg.Hotkeys.SwitchToHost != "ctrl+alt+home" {
+		t.Fatalf("default SwitchToHost: %q", cfg.Hotkeys.SwitchToHost)
+	}
+	if cfg.Hotkeys.DisconnectAll != "" {
+		t.Fatalf("default DisconnectAll should be empty, got %q", cfg.Hotkeys.DisconnectAll)
+	}
+	if cfg.Hotkeys.TogglePause != "" {
+		t.Fatalf("default TogglePause should be empty, got %q", cfg.Hotkeys.TogglePause)
 	}
 }
 
