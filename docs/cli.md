@@ -6,19 +6,17 @@
 
 **正常使用（两台机器）**：无需指定端口，默认使用 `config.json` 中的 `port`（默认 `39172`）。
 
-**本地多进程测试**：通过 `MB_PORT` 环境变量指定端口，无需每条命令都加 `-p`：
+**本地多进程测试**：通过 `MB_PORT` 环境变量指定端口：
 
 ```bash
 MB_PORT=39172 mousebridge daemon --serve
 MB_PORT=39174 mousebridge daemon
-MB_PORT=39174 mousebridge connect 127.0.0.1 --target-port 39172
+MB_PORT=39174 mousebridge connect 127.0.0.1:39172
 ```
 
-端口解析优先级：`-p` flag > `MB_PORT` 环境变量 > `config.json` > 默认值 `39172`。
+端口解析优先级：`MB_PORT` 环境变量 > `config.json` > 默认值 `39172`。
 
 `--socket <path>` 可直接覆盖 socket 路径，优先级最高。
-
----
 
 ---
 
@@ -34,7 +32,6 @@ mousebridge daemon [--serve] [--connect <ip> ...]
 |------|------|--------|
 | `--serve` | 启动后立即开始监听入站连接 | — |
 | `--connect <ip>` | 启动后立即连接指定 IP，可重复多次 | — |
-| `-p`, `--port` | 覆盖端口（通常用 `MB_PORT` 替代） | 来自 config |
 
 ---
 
