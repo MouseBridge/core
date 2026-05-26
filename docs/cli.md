@@ -48,17 +48,19 @@ mousebridge serve
 
 ---
 
-## `mousebridge connect <ip>`
+## `mousebridge connect`
 
 告诉 daemon 连接到远端 daemon（主机角色），发完命令立即退出。可多次调用追加连接。
 
 ```bash
-mousebridge connect <ip> [--target-port <port>]
+mousebridge connect <ip>:<port>          # ip:port 一体写法
+mousebridge connect <ip> --port <port>   # 分开写法
+mousebridge connect <ip>                 # 省略端口，使用远端默认端口
 ```
 
 | 标志 | 说明 | 默认值 |
 |------|------|--------|
-| `--target-port` | 远端 daemon 的 TCP 端口 | 本地 daemon 端口 |
+| `--port` | 远端 daemon 的 TCP 端口 | 来自 config |
 
 ---
 

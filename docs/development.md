@@ -14,7 +14,7 @@ MB_PORT=39174 mousebridge daemon
 # 终端 3 — 等两个 daemon 都打印 "socket:" 后再执行
 
 # B 连接 A
-MB_PORT=39174 mousebridge connect 127.0.0.1 --target-port 39172
+MB_PORT=39174 mousebridge connect 127.0.0.1:39172
 
 # A 日志显示 pair_request 和 PIN
 # 在 A 上接受
@@ -36,7 +36,7 @@ MB_PORT=39172 mousebridge trust add <B-device-id> --name "MacBook-B"
 
 # 断开后重连，A 自动接受，无需 PIN
 MB_PORT=39174 mousebridge disconnect <B-device-id>
-MB_PORT=39174 mousebridge connect 127.0.0.1 --target-port 39172
+MB_PORT=39174 mousebridge connect 127.0.0.1:39172
 
 # 撤销信任
 MB_PORT=39172 mousebridge trust remove <B-device-id>
