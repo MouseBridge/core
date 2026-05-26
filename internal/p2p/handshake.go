@@ -63,6 +63,10 @@ func HandleInbound(c *transport.Conn, h InboundHost, sessionHost Host, emit func
 	}
 	var prPay event.PairRequestPayload
 	_ = event.DecodePayload(pairMsg, &prPay)
+	// Prefer handshake name; PairRequest name is a redundant fallback.
+	if prPay.Name == "" {
+		prPay.Name = hsPay.Name
+	}
 
 	if h.IsTrusted(prPay.DeviceID) {
 		_ = c.Send(event.Message{V: 1, Seq: 2, Type: event.TypePairPin, Ts: nowMs(), Payload: event.PairPinPayload{}})
