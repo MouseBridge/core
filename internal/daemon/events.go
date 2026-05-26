@@ -2,11 +2,12 @@ package daemon
 
 // Command is sent by a CLI client to the daemon over Unix Socket.
 type Command struct {
-	Cmd      string `json:"cmd"`                 // "serve"|"connect"|"pair_accept"|"pair_reject"|"pair_pin"|"status"|"disconnect"|"stop_serve"
+	Cmd      string `json:"cmd"`                 // "serve"|"connect"|"pair_accept"|"pair_reject"|"pair_pin"|"status"|"disconnect"|"stop_serve"|"trust"|"untrust"|"trusted_list"
 	IP       string `json:"ip,omitempty"`        // for "connect"
 	Port     int    `json:"port,omitempty"`      // for "connect"
 	PIN      string `json:"pin,omitempty"`       // for "pair_pin"
-	DeviceID string `json:"device_id,omitempty"` // for "disconnect"
+	DeviceID string `json:"device_id,omitempty"` // for "disconnect"|"trust"|"untrust"
+	Name     string `json:"name,omitempty"`      // for "trust"
 }
 
 // Event is pushed from the daemon to all connected CLI clients.
@@ -16,6 +17,7 @@ type Event struct {
 	DeviceID string        `json:"device_id,omitempty"` // for device events
 	Name    string         `json:"name,omitempty"`    // for device events
 	PIN     string         `json:"pin,omitempty"`     // for "pair_request"
+	Role    string         `json:"role,omitempty"`    // for "pair_request": "host"|"slave"
 	IP      string         `json:"ip,omitempty"`      // for "connected"
 	Msg     string         `json:"msg,omitempty"`     // for "log" and "error"
 	Devices []DeviceStatus `json:"devices"` // for "status"

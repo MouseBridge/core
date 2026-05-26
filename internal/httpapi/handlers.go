@@ -74,7 +74,11 @@ func (s *Server) handlePairAccept(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.d.HandleCommand(daemon.Command{Cmd: "pair_accept"})
+	var req struct {
+		DeviceID string `json:"device_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	s.d.HandleCommand(daemon.Command{Cmd: "pair_accept", DeviceID: req.DeviceID})
 	writeJSON(w, map[string]string{"ok": "true"})
 }
 
@@ -83,7 +87,11 @@ func (s *Server) handlePairReject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.d.HandleCommand(daemon.Command{Cmd: "pair_reject"})
+	var req struct {
+		DeviceID string `json:"device_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	s.d.HandleCommand(daemon.Command{Cmd: "pair_reject", DeviceID: req.DeviceID})
 	writeJSON(w, map[string]string{"ok": "true"})
 }
 
@@ -141,6 +149,36 @@ func (h *sseHub) broadcast(ev daemon.Event) {
 		case ch <- ev:
 		default:
 		}
+	}
+}
+
+func (s *Server) handleTrust(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, s.d.TrustedList())
+	case http.MethodPost:
+		var req struct {
+			DeviceID string `json:"device_id"`
+			Name     string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceID == "" {
+			http.Error(w, "device_id required", http.StatusBadRequest)
+			return
+		}
+		s.d.HandleCommand(daemon.Command{Cmd: "trust", DeviceID: req.DeviceID, Name: req.Name})
+		writeJSON(w, map[string]string{"ok": "true"})
+	case http.MethodDelete:
+		var req struct {
+			DeviceID string `json:"device_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceID == "" {
+			http.Error(w, "device_id required", http.StatusBadRequest)
+			return
+		}
+		s.d.HandleCommand(daemon.Command{Cmd: "untrust", DeviceID: req.DeviceID})
+		writeJSON(w, map[string]string{"ok": "true"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 

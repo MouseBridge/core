@@ -23,6 +23,7 @@ func main() {
 	root.AddCommand(cli.PairCmd())
 	root.AddCommand(cli.DisconnectCmd())
 	root.AddCommand(cli.StopServeCmd())
+	root.AddCommand(cli.TrustCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

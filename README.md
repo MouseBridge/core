@@ -94,21 +94,47 @@ mousebridge status                 # 查看当前连接
 ### 本地双进程测试
 
 ```bash
-# 进程 A — 从机，端口 39172，socket = ~/.mousebridge/mb-39172.sock
-mousebridge daemon --serve -p 39172
+# 终端 1 — 进程 A（从机），TCP 39172，HTTP API 39176
+mousebridge daemon --serve -p 39172 --http-port 39176
 
-# 进程 B — 主机，端口 39173，socket = ~/.mousebridge/mb-39173.sock
-mousebridge daemon -p 39173
+# 终端 2 — 进程 B（主机），TCP 39174，HTTP API 39177
+mousebridge daemon -p 39174 --http-port 39177
 
-# 让 B 连接 A（新终端执行）
-mousebridge connect 127.0.0.1 -p 39173
+# 终端 3 — 等两个 daemon 都打印 socket: 后再执行
 
-# 在 A 侧接受配对
+# 让 B 连接 A（-p 指定 B 的 daemon socket，--target-port 指定 A 的 TCP 端口）
+mousebridge connect 127.0.0.1 -p 39174 --target-port 39172
+
+# A 会打印 pair_request，含 PIN（只在 A 本地可见，不通过网络传输）
+# B 会打印 pair_request，提示从远端设备获取 PIN
+
+# 在 A 上 accept（从机侧）
 mousebridge pair accept -p 39172
+
+# 在 B 上提交 A 显示的 PIN（主机侧）
+mousebridge pair pin <PIN> -p 39174
 
 # 查看状态
 mousebridge status -p 39172
-mousebridge status -p 39173
+mousebridge status -p 39174
+```
+
+#### 信任设备（后续连接免 PIN）
+
+配对成功后，可将对方加入信任列表。下次连接时 A 将自动接受，无需 PIN。
+
+```bash
+# 在 A 上信任 B（device-id 从 status 或 pair_request 日志获取）
+mousebridge trust add <B-device-id> --name "My-MacBook-B" -p 39172
+
+# 查看已信任设备
+mousebridge trust list -p 39172
+
+# 再次连接时 A 将自动 accept，B 侧无需 pair pin 步骤
+mousebridge connect 127.0.0.1 -p 39174 --target-port 39172
+
+# 撤销信任
+mousebridge trust remove <B-device-id> -p 39172
 ```
 
 ---
@@ -122,12 +148,13 @@ mousebridge status -p 39173
 启动守护进程，前台阻塞。Ctrl+C 触发优雅关闭：停止监听、断开所有连接、删除 socket 文件。
 
 ```bash
-mousebridge daemon [-p <port>] [--serve] [--connect <ip> ...]
+mousebridge daemon [-p <port>] [--http-port <port>] [--serve] [--connect <ip> ...]
 ```
 
 | 标志 | 说明 | 默认值 |
 |------|------|--------|
-| `-p`, `--port` | TCP 端口，同时决定 socket 路径 | 39172 |
+| `-p`, `--port` | TCP 端口（P2P 设备互联），同时决定 socket 路径 | 39172 |
+| `--http-port` | HTTP API 端口（浏览器 UI） | 39173 |
 | `--serve` | 启动后立即开始监听 | — |
 | `--connect <ip>` | 启动后立即连接，可重复多次 | — |
 
@@ -154,6 +181,14 @@ mousebridge daemon [-p <port>] [--serve] [--connect <ip> ...]
 ### `mousebridge status`
 
 查看当前连接设备列表及延迟统计。
+
+### `mousebridge trust add|remove|list`
+
+管理信任设备列表（持久化到 `~/.mousebridge/trusted.json`）。
+
+- `trust add <device-id> [--name <name>]` — 信任指定设备，后续连接自动免 PIN
+- `trust remove <device-id>` — 撤销信任
+- `trust list` — 列出所有已信任设备
 
 ---
 

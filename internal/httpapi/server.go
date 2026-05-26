@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/mousebridge/core/internal/daemon"
 	"github.com/mousebridge/core/internal/shortcuts"
@@ -43,10 +44,12 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Stop shuts down the HTTP server gracefully.
+// Stop shuts down the HTTP server, waiting at most 3 seconds for active connections.
 func (s *Server) Stop() {
 	if s.srv != nil {
-		_ = s.srv.Shutdown(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = s.srv.Shutdown(ctx)
 	}
 }
 
@@ -60,6 +63,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/pair/pin", s.handlePairPIN)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/shortcuts", s.handleShortcuts)
+	mux.HandleFunc("/api/trusted", s.handleTrust)
 	mux.HandleFunc("/api/events", s.handleSSE)
 }
 
