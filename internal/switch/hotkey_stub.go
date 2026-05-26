@@ -2,7 +2,7 @@
 
 package switch_
 
-import "log"
+import log "github.com/sirupsen/logrus"
 
 // HotkeyListener is a no-op stub for non-macOS platforms.
 type HotkeyListener struct {

@@ -4,9 +4,10 @@ package switch_
 
 import (
 	"bufio"
-	"log"
 	"os"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // HotkeyListener listens for switch hotkeys.

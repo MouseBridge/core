@@ -3,8 +3,9 @@ package httpapi
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/mousebridge/core/internal/daemon"
 )

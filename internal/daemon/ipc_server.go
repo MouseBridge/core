@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"sync"
@@ -92,7 +91,5 @@ func (s *IPCServer) removeClient(c *ipcClient) {
 	c.close()
 	s.mu.Lock()
 	delete(s.clients, c)
-	remaining := len(s.clients)
 	s.mu.Unlock()
-	log.Printf("ipc: client disconnected (%d remaining)", remaining)
 }

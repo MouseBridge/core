@@ -2,9 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/spf13/cobra"
 	"github.com/mousebridge/core/internal/config"
@@ -56,8 +57,14 @@ func printEvent(ev daemon.Event) {
 	case "error":
 		log.Printf("[error] %s", ev.Msg)
 	case "pair_request":
-		log.Printf("[pair] request from %s — PIN: %s", ev.Name, ev.PIN)
-		log.Printf("[pair] run: mousebridge pair accept  OR  mousebridge pair reject")
+		if ev.PIN != "" {
+			// slave side: show PIN to user
+			log.Printf("[pair] request from %s — PIN: %s (share this with the remote user)", ev.Name, ev.PIN)
+			log.Printf("[pair] run: mousebridge pair accept %s  OR  mousebridge pair reject %s", ev.DeviceID, ev.DeviceID)
+		} else {
+			// host side: user must get PIN from remote
+			log.Printf("[pair] pairing with %s — run: mousebridge pair pin <PIN> -p <port>", ev.Name)
+		}
 	case "paired":
 		log.Printf("[pair] paired with %s", ev.Name)
 	case "connected":

@@ -4,9 +4,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // ipcClient represents one connected CLI/UI client on the Unix Socket.

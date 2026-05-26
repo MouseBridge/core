@@ -2,9 +2,10 @@ package net
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // ConnHandler is called for each accepted connection.
@@ -24,8 +25,8 @@ func NewServer(handler ConnHandler) *Server {
 
 // Listen starts accepting on the given port. Closes any existing listener first.
 func (s *Server) Listen(port int) error {
-	addr := fmt.Sprintf(":%d", port)
-	ln, err := net.Listen("tcp", addr)
+	addr := fmt.Sprintf("0.0.0.0:%d", port)
+	ln, err := net.Listen("tcp4", addr)
 	if err != nil {
 		return fmt.Errorf("net: listen %s: %w", addr, err)
 	}

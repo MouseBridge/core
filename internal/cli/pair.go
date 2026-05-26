@@ -18,23 +18,35 @@ func PairCmd() *cobra.Command {
 }
 
 func pairAcceptCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "accept",
-		Short: "Accept the pending pair request",
+	cmd := &cobra.Command{
+		Use:   "accept [device-id]",
+		Short: "Accept a pending pair request (device-id required when multiple are pending)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return sendOneCommand(socketFlag(cmd), daemon.Command{Cmd: "pair_accept"})
+			deviceID := ""
+			if len(args) > 0 {
+				deviceID = args[0]
+			}
+			return sendOneCommand(socketFlag(cmd), daemon.Command{Cmd: "pair_accept", DeviceID: deviceID})
 		},
 	}
+	return cmd
 }
 
 func pairRejectCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "reject",
-		Short: "Reject the pending pair request",
+	cmd := &cobra.Command{
+		Use:   "reject [device-id]",
+		Short: "Reject a pending pair request (device-id required when multiple are pending)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return sendOneCommand(socketFlag(cmd), daemon.Command{Cmd: "pair_reject"})
+			deviceID := ""
+			if len(args) > 0 {
+				deviceID = args[0]
+			}
+			return sendOneCommand(socketFlag(cmd), daemon.Command{Cmd: "pair_reject", DeviceID: deviceID})
 		},
 	}
+	return cmd
 }
 
 func pairPINCmd() *cobra.Command {

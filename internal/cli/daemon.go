@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/daemon"
@@ -19,6 +19,7 @@ func DaemonCmd() *cobra.Command {
 		RunE:  runDaemon,
 	}
 	cmd.Flags().IntP("port", "p", 0, "TCP port (default: from config)")
+	cmd.Flags().Int("http-port", 0, "HTTP API port (default: from config)")
 	cmd.Flags().Bool("serve", false, "start listening for incoming connections on startup")
 	cmd.Flags().StringArray("connect", nil, "connect to remote device IP on startup (repeatable)")
 	return cmd
@@ -27,6 +28,7 @@ func DaemonCmd() *cobra.Command {
 func runDaemon(cmd *cobra.Command, args []string) error {
 	socketPath := socketFlag(cmd)
 	port, _ := cmd.Flags().GetInt("port")
+	httpPort, _ := cmd.Flags().GetInt("http-port")
 	doServe, _ := cmd.Flags().GetBool("serve")
 	connectIPs, _ := cmd.Flags().GetStringArray("connect")
 
@@ -36,6 +38,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 	if port == 0 {
 		port = cfg.Port
+	}
+	if httpPort != 0 {
+		cfg.HTTPPort = httpPort
 	}
 
 	d := daemon.New(daemon.Options{
