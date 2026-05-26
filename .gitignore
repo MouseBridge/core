@@ -33,3 +33,6 @@ frontend/dist/
 # Swift helper (Step 3, not in this branch yet)
 helper/macos/.build/
 helper/macos/*.resolved
+
+# Git worktrees
+.worktrees/
