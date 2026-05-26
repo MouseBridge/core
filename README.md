@@ -32,7 +32,7 @@ mousebridge daemon              ← 守护进程（前台阻塞，Ctrl+C 退出�
     │   mousebridge serve / connect / disconnect / status / pair
     │   （发完命令立即退出）
     │
-    └── TCP :<port>  ← P2P 设备互联 + HTTP API 共用同一端口
+    └── TCP :<port>  ← 单端口，P2P 与 HTTP API 共用
             │  首行 "MOUSEBRIDGE/1.0\n" → P2P JSON Lines 协议
             │  其他（HTTP 请求）        → 浏览器 UI（REST + SSE）
             ↕
@@ -96,10 +96,10 @@ mousebridge status                 # 查看当前连接
 ### 本地双进程测试
 
 ```bash
-# 终端 1 — 进程 A（从机），端口 39172（P2P + HTTP API 共用）
+# 终端 1 — 进程 A（从机），单端口 39172（P2P + HTTP API 共用）
 mousebridge daemon --serve -p 39172
 
-# 终端 2 — 进程 B（主机），端口 39174（P2P + HTTP API 共用）
+# 终端 2 — 进程 B（主机），单端口 39174
 mousebridge daemon -p 39174
 
 # 终端 3 — 等两个 daemon 都打印 socket: 后再执行
