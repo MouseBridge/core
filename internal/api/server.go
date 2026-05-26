@@ -62,6 +62,7 @@ func (s *Server) routes(r *gin.Engine) {
 	api.POST("/pair/reject", s.handlePairReject)
 	api.POST("/pair/pin", s.handlePairPIN)
 	api.GET("/status", s.handleStatus)
+	api.GET("/devices", s.handleDevices)
 	api.GET("/shortcuts", s.handleShortcuts)
 	api.PUT("/shortcuts", s.handleShortcuts)
 	api.GET("/trusted", s.handleTrust)

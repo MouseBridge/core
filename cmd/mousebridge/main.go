@@ -24,6 +24,7 @@ func main() {
 	root.AddCommand(cli.DisconnectCmd())
 	root.AddCommand(cli.StopServeCmd())
 	root.AddCommand(cli.TrustCmd())
+	root.AddCommand(cli.DevicesCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

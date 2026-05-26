@@ -177,10 +177,20 @@ func (d *Daemon) cmdStatus() {
 		statuses = append(statuses, DeviceStatus{
 			ID:           dv.ID,
 			Name:         dv.Name,
+			IP:           dv.IP,
+			Role:         dv.Role,
 			AvgLatencyMs: dv.AvgLatencyMs,
 		})
 	}
-	d.broadcast(Event{Event: "status", Devices: statuses})
+	serving, port := d.servingState()
+	d.broadcast(Event{
+		Event:     "status",
+		Devices:   statuses,
+		Serving:   serving,
+		Port:      port,
+		LocalID:   d.cfg.DeviceID,
+		LocalName: d.cfg.DeviceName,
+	})
 }
 
 func (d *Daemon) cmdDisconnect(deviceID string) {

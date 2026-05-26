@@ -84,6 +84,10 @@ func (s *Server) handleStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, s.d.State())
 }
 
+func (s *Server) handleDevices(c *gin.Context) {
+	c.JSON(http.StatusOK, s.d.State().Devices)
+}
+
 func (s *Server) handleTrust(c *gin.Context) {
 	switch c.Request.Method {
 	case http.MethodGet:
@@ -142,6 +146,18 @@ func (s *Server) handleSSE(c *gin.Context) {
 	ch := make(chan daemon.Event, 64)
 	s.hub.add(ch)
 	defer s.hub.remove(ch)
+
+	// Send current state immediately so the client's onopen fires right away.
+	st := s.d.State()
+	serving, port := st.Serving, st.Port
+	ch <- daemon.Event{
+		Event:     "status",
+		Serving:   serving,
+		Port:      port,
+		LocalID:   s.d.Config().DeviceID,
+		LocalName: s.d.Config().DeviceName,
+		Devices:   st.Devices,
+	}
 
 	log.Printf("api: SSE client connected from %s", c.Request.RemoteAddr)
 

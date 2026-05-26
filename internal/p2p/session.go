@@ -14,7 +14,7 @@ import (
 type Host interface {
 	TrackConn(c *transport.Conn, deviceID string)
 	UntrackConn(c *transport.Conn)
-	SessionAdd(id, name, ip string)
+	SessionAdd(id, name, ip, role string)
 	SessionRemove(id string)
 	SessionRecordLatency(id string, ms float64)
 	SetPendingHostConn(c *transport.Conn)
@@ -91,7 +91,7 @@ func RunHostSession(c *transport.Conn, localID, localName string, h Host, emit f
 	}
 
 	emit(Event{Kind: "paired", DeviceID: remoteID, Name: remoteName})
-	h.SessionAdd(remoteID, remoteName, c.RemoteAddr().String())
+	h.SessionAdd(remoteID, remoteName, c.RemoteAddr().String(), "host")
 	emit(Event{Kind: "connected", DeviceID: remoteID, Name: remoteName, IP: c.RemoteAddr().String()})
 	log.Printf("[p2p] connected to %s (%s)", remoteName, c.RemoteAddr())
 
@@ -127,7 +127,7 @@ func RunSlaveSession(c *transport.Conn, peerID, peerName string, h Host, emit fu
 
 	nowMs := func() int64 { return time.Now().UnixMilli() }
 
-	h.SessionAdd(peerID, peerName, c.RemoteAddr().String())
+	h.SessionAdd(peerID, peerName, c.RemoteAddr().String(), "slave")
 	emit(Event{Kind: "connected", DeviceID: peerID, Name: peerName, IP: c.RemoteAddr().String()})
 	log.Printf("[p2p] slave session started with %s (id=%s)", peerName, peerID)
 

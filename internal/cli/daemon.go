@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -46,17 +47,26 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		DeviceName: cfg.DeviceName,
 	})
 
-	// Start HTTP API server; connections arrive via httpConnCh once Serve is called.
 	apiSrv := api.New(d)
-	httpLn := api.NewChanListener(d.HTTPConnCh(), &net.TCPAddr{IP: net.IPv4zero, Port: port})
-	apiSrv.Start(httpLn)
+
+	if doServe {
+		// Host: P2P + HTTP share the same TCP port via mux.
+		httpLn := api.NewChanListener(d.HTTPConnCh(), &net.TCPAddr{IP: net.IPv4zero, Port: port})
+		apiSrv.Start(httpLn)
+	} else {
+		// Client: no P2P inbound needed, open a plain TCP listener for HTTP only.
+		httpLn, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
+		if err != nil {
+			return fmt.Errorf("daemon: http listen: %w", err)
+		}
+		apiSrv.Start(httpLn)
+	}
 
 	if err := d.Start(); err != nil {
 		return err
 	}
 	log.Printf("[daemon] started — port=%d socket=%s device=%s", port, socketPath, cfg.DeviceName)
 
-	// --serve opens the shared TCP listener (P2P + HTTP mux).
 	if doServe {
 		d.Serve(port)
 	}

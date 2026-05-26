@@ -7,6 +7,7 @@ type DeviceInfo struct {
 	ID           string
 	Name         string
 	IP           string
+	Role         string // "host" | "slave"
 	AvgLatencyMs float64
 	latencies    []float64
 }
@@ -21,11 +22,11 @@ func NewManager() *Manager {
 	return &Manager{devices: make(map[string]*DeviceInfo)}
 }
 
-// Add registers a device as connected.
-func (m *Manager) Add(id, name, ip string) {
+// Add registers a device as connected. role is "host" or "slave".
+func (m *Manager) Add(id, name, ip, role string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.devices[id] = &DeviceInfo{ID: id, Name: name, IP: ip}
+	m.devices[id] = &DeviceInfo{ID: id, Name: name, IP: ip, Role: role}
 }
 
 // Remove deregisters a device.

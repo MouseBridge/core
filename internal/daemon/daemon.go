@@ -107,6 +107,14 @@ func (d *Daemon) Stop() {
 	}
 	d.ipc.Stop()
 	close(d.httpConnCh)
+
+	// Close all subscriber channels so goroutines blocked on "for range ch" can exit.
+	d.subsMu.Lock()
+	for ch := range d.subs {
+		close(ch)
+	}
+	d.subs = make(map[chan Event]struct{})
+	d.subsMu.Unlock()
 }
 
 // HTTPConnCh returns the channel that receives raw HTTP connections from the mux.
@@ -186,7 +194,7 @@ func (d *Daemon) UntrackConn(c *transport.Conn) {
 	d.connsMu.Unlock()
 }
 
-func (d *Daemon) SessionAdd(id, name, ip string)             { d.sess.Add(id, name, ip) }
+func (d *Daemon) SessionAdd(id, name, ip, role string)        { d.sess.Add(id, name, ip, role) }
 func (d *Daemon) SessionRemove(id string)                    { d.sess.Remove(id) }
 func (d *Daemon) SessionRecordLatency(id string, ms float64) { d.sess.RecordLatency(id, ms) }
 
@@ -254,9 +262,12 @@ func (d *Daemon) Subscribe() chan Event {
 // Unsubscribe removes the channel and closes it.
 func (d *Daemon) Unsubscribe(ch chan Event) {
 	d.subsMu.Lock()
+	_, exists := d.subs[ch]
 	delete(d.subs, ch)
 	d.subsMu.Unlock()
-	close(ch)
+	if exists {
+		close(ch)
+	}
 }
 
 func (d *Daemon) broadcast(ev Event) {
@@ -291,6 +302,7 @@ func (d *Daemon) State() DaemonState {
 			ID:           dv.ID,
 			Name:         dv.Name,
 			IP:           dv.IP,
+			Role:         dv.Role,
 			AvgLatencyMs: dv.AvgLatencyMs,
 		})
 	}

@@ -25,15 +25,28 @@ func StatusCmd() *cobra.Command {
 
 			return daemon.ReadEvents(conn, func(ev daemon.Event) bool {
 				if ev.Event == "status" {
-					if len(ev.Devices) == 0 {
-						fmt.Println("No connected devices.")
+					localID := ev.LocalID
+					if len(localID) > 8 {
+						localID = localID[:8]
 					}
-					for _, d := range ev.Devices {
-						id := d.ID
-						if len(id) > 8 {
-							id = id[:8]
+					fmt.Printf("Local:   %s  id=%s\n", ev.LocalName, localID)
+					if ev.Serving {
+						fmt.Printf("Serving: yes  port=%d\n", ev.Port)
+					} else {
+						fmt.Println("Serving: no")
+					}
+					if len(ev.Devices) == 0 {
+						fmt.Println("Peers:   none")
+					} else {
+						fmt.Printf("Peers:   %d\n", len(ev.Devices))
+						for _, d := range ev.Devices {
+							id := d.ID
+							if len(id) > 8 {
+								id = id[:8]
+							}
+							fmt.Printf("  %-20s  id=%-8s  role=%-5s  ip=%-21s  avg=%.1fms\n",
+								d.Name, id, d.Role, d.IP, d.AvgLatencyMs)
 						}
-						fmt.Printf("  %s (%s)  avg_latency=%.1fms\n", d.Name, id, d.AvgLatencyMs)
 					}
 					return false
 				}
