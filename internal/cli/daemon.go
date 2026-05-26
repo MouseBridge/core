@@ -38,6 +38,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if port == 0 {
 		port = cfg.Port
 	}
+	// Recompute DeviceID based on the actual port being used.
+	cfg.DeviceID = config.DeriveDeviceID(port)
 
 	d := daemon.New(daemon.Options{
 		SocketPath: socketPath,

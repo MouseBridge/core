@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Hotkeys holds configurable key bindings.
@@ -46,12 +48,32 @@ func Default() *Config {
 	return cfg
 }
 
-// DeriveDeviceID computes a stable 8-char ID from hostname + port.
-// Same machine, different port → different ID. Deterministic across restarts.
+// DeriveDeviceID computes a stable 8-char ID from machine identity + port.
+// Uses hostname + machine serial number (if available) so the ID survives
+// renames but differs across physical machines. Same machine, different port
+// → different ID. Deterministic across restarts.
 func DeriveDeviceID(port int) string {
 	h, _ := os.Hostname()
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", h, port)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%d", h, machineSerial(), port)))
 	return hex.EncodeToString(sum[:4])
+}
+
+// machineSerial returns a hardware serial number or empty string if unavailable.
+func machineSerial() string {
+	out, err := exec.Command("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output()
+	if err != nil {
+		return ""
+	}
+	// Extract IOPlatformSerialNumber value.
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "IOPlatformSerialNumber") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				return strings.Trim(strings.TrimSpace(parts[1]), `"`)
+			}
+		}
+	}
+	return ""
 }
 
 // Load reads a Config from path. Returns Default() if the file does not exist.
