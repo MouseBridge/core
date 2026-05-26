@@ -2,20 +2,18 @@ package daemon
 
 import (
 	"fmt"
+	"net"
 	"sync"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/mousebridge/core/internal/config"
-	"github.com/mousebridge/core/internal/event"
-	mnet "github.com/mousebridge/core/internal/net"
-	"github.com/mousebridge/core/internal/pairing"
+	"github.com/mousebridge/core/internal/p2p"
 	"github.com/mousebridge/core/internal/session"
 	sw "github.com/mousebridge/core/internal/switch"
+	"github.com/mousebridge/core/internal/transport"
 	"github.com/mousebridge/core/internal/trusted"
 )
-
 
 // Options configures the daemon.
 type Options struct {
@@ -23,42 +21,34 @@ type Options struct {
 	TCPPort    int
 	DeviceID   string
 	DeviceName string
-	HTTPHost   string
-	HTTPPort   int
 	ConfigPath string
 }
 
-type pendingSlaveEntry struct {
-	mgr  *pairing.Manager
-	conn *mnet.Conn
-	name string
-}
-
-// Daemon owns all long-running state: TCP listener, IPC server, sessions.
+// Daemon owns all long-running state: IPC server, sessions, connection tracking.
 type Daemon struct {
 	opts       Options
 	configPath string
 	cfg        *config.Config
-	ipc    *IPCServer
-	tcpSrv *mnet.Server
-	sess   *session.Manager
-	ctrl   *sw.Controller
-	trust  *trusted.Store
+	ipc        *IPCServer
+	sess       *session.Manager
+	ctrl       *sw.Controller
+	trust      *trusted.Store
 
 	pairMu          sync.Mutex
-	pendingPairs    map[string]*pendingSlaveEntry // device_id → slave-side pending pair
-	pendingHostConn *mnet.Conn                   // host-side: waiting for PIN confirmation
+	pendingPairs    map[string]*p2p.PendingSlaveEntry
+	pendingHostConn *transport.Conn
 
 	connsMu sync.Mutex
-	conns   map[*mnet.Conn]string // conn → deviceID ("" while not yet paired)
+	conns   map[*transport.Conn]string
 
 	subsMu sync.RWMutex
 	subs   map[chan Event]struct{}
 
-	httpSrv interface {
-		Start() error
-		Stop()
-	}
+	// httpConnCh receives raw HTTP connections from the mux for the API server.
+	httpConnCh chan net.Conn
+
+	// serveLn is the listener opened by cmdServe; nil when not serving.
+	serveLn net.Listener
 }
 
 // New creates a Daemon with the given options.
@@ -72,7 +62,6 @@ func New(opts Options) *Daemon {
 	}
 	if opts.TCPPort != 0 {
 		cfg.Port = opts.TCPPort
-		// Recompute ID when port is overridden via CLI flag.
 		if opts.DeviceID == "" {
 			cfg.DeviceID = config.DeriveDeviceID(cfg.Port)
 		}
@@ -89,12 +78,12 @@ func New(opts Options) *Daemon {
 		sess:         session.NewManager(),
 		ctrl:         sw.NewController("local"),
 		trust:        trustStore,
-		pendingPairs: make(map[string]*pendingSlaveEntry),
-		conns:        make(map[*mnet.Conn]string),
+		pendingPairs: make(map[string]*p2p.PendingSlaveEntry),
+		conns:        make(map[*transport.Conn]string),
 		subs:         make(map[chan Event]struct{}),
+		httpConnCh:   make(chan net.Conn, 64),
 	}
 	d.ipc = NewIPCServer(opts.SocketPath, d.handleCommand)
-	d.tcpSrv = mnet.NewServer(d.handleInbound)
 	return d
 }
 
@@ -104,46 +93,120 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("daemon: ipc: %w", err)
 	}
 	log.Printf("[daemon] socket: %s", d.opts.SocketPath)
-	if d.httpSrv != nil {
-		if err := d.httpSrv.Start(); err != nil {
-			return fmt.Errorf("daemon: http: %w", err)
-		}
-	}
 	return nil
 }
 
-// Stop shuts down all listeners and closes active connections.
+// Stop shuts down IPC and closes all tracked P2P connections.
 func (d *Daemon) Stop() {
-	if d.httpSrv != nil {
-		d.httpSrv.Stop()
-	}
-	d.tcpSrv.Stop()
 	d.connsMu.Lock()
 	conns := d.conns
-	d.conns = make(map[*mnet.Conn]string)
+	d.conns = make(map[*transport.Conn]string)
 	d.connsMu.Unlock()
 	for c := range conns {
 		c.Close()
 	}
 	d.ipc.Stop()
+	close(d.httpConnCh)
 }
 
-func (d *Daemon) trackConn(c *mnet.Conn, deviceID string) {
+// HTTPConnCh returns the channel that receives raw HTTP connections from the mux.
+// The api.Server should drain this channel via a chanListener.
+func (d *Daemon) HTTPConnCh() <-chan net.Conn {
+	return d.httpConnCh
+}
+
+// handleHTTP is called by the mux for each HTTP connection.
+func (d *Daemon) handleHTTP(c net.Conn) {
+	select {
+	case d.httpConnCh <- c:
+	default:
+		log.Printf("[daemon] httpConnCh full, dropping connection from %s", c.RemoteAddr())
+		_ = c.Close()
+	}
+}
+
+// handleP2P is called by the mux for each P2P connection.
+func (d *Daemon) handleP2P(c *transport.Conn) {
+	go p2p.HandleInbound(c, d, d, d.emitP2PEvent)
+}
+
+// emitP2PEvent converts a p2p.Event to a daemon.Event and broadcasts it.
+func (d *Daemon) emitP2PEvent(ev p2p.Event) {
+	switch ev.Kind {
+	case "error":
+		d.broadcast(Event{Event: "error", Msg: ev.Msg})
+	case "log":
+		d.broadcast(Event{Event: "log", Msg: ev.Msg})
+	case "paired":
+		d.broadcast(Event{Event: "paired", DeviceID: ev.DeviceID, Name: ev.Name})
+		log.Printf("[daemon] paired with %s (id=%s) — to trust: mousebridge trust add %s --name '%s'",
+			ev.Name, ev.DeviceID, ev.DeviceID, ev.Name)
+	case "pair_request":
+		d.broadcast(Event{Event: "pair_request", DeviceID: ev.DeviceID, Name: ev.Name, PIN: ev.PIN, Role: ev.Role})
+		if ev.PIN != "" {
+			log.Printf("[daemon] pair_request from %s (id=%s) — PIN: %s", ev.Name, ev.DeviceID, ev.PIN)
+		} else {
+			log.Printf("[daemon] pairing with %s — enter PIN shown on remote device", ev.Name)
+		}
+	case "connected":
+		d.broadcast(Event{Event: "connected", DeviceID: ev.DeviceID, Name: ev.Name, IP: ev.IP})
+		log.Printf("[daemon] connected to %s (%s)", ev.Name, ev.IP)
+	case "disconnected":
+		d.broadcast(Event{Event: "disconnected", DeviceID: ev.DeviceID, Name: ev.Name})
+	}
+}
+
+// p2p.InboundHost interface
+func (d *Daemon) LocalID() string            { return d.cfg.DeviceID }
+func (d *Daemon) LocalName() string          { return d.cfg.DeviceName }
+func (d *Daemon) IsTrusted(id string) bool   { return d.trust.IsTrusted(id) }
+
+func (d *Daemon) AddPendingSlave(deviceID string, entry *p2p.PendingSlaveEntry) {
+	d.pairMu.Lock()
+	d.pendingPairs[deviceID] = entry
+	d.pairMu.Unlock()
+}
+
+func (d *Daemon) RemovePendingSlave(deviceID string) {
+	d.pairMu.Lock()
+	delete(d.pendingPairs, deviceID)
+	d.pairMu.Unlock()
+}
+
+// p2p.Host interface
+func (d *Daemon) TrackConn(c *transport.Conn, deviceID string) {
 	d.connsMu.Lock()
 	d.conns[c] = deviceID
 	d.connsMu.Unlock()
 }
 
-func (d *Daemon) untrackConn(c *mnet.Conn) {
+func (d *Daemon) UntrackConn(c *transport.Conn) {
 	d.connsMu.Lock()
 	delete(d.conns, c)
 	d.connsMu.Unlock()
 }
 
-// closeConnByDeviceID finds and closes the TCP connection for a given deviceID.
+func (d *Daemon) SessionAdd(id, name, ip string)             { d.sess.Add(id, name, ip) }
+func (d *Daemon) SessionRemove(id string)                    { d.sess.Remove(id) }
+func (d *Daemon) SessionRecordLatency(id string, ms float64) { d.sess.RecordLatency(id, ms) }
+
+func (d *Daemon) SetPendingHostConn(c *transport.Conn) {
+	d.pairMu.Lock()
+	d.pendingHostConn = c
+	d.pairMu.Unlock()
+}
+
+func (d *Daemon) ClearPendingHostConn(c *transport.Conn) {
+	d.pairMu.Lock()
+	if d.pendingHostConn == c {
+		d.pendingHostConn = nil
+	}
+	d.pairMu.Unlock()
+}
+
 func (d *Daemon) closeConnByDeviceID(deviceID string) {
 	d.connsMu.Lock()
-	var target *mnet.Conn
+	var target *transport.Conn
 	for c, id := range d.conns {
 		if id == deviceID {
 			target = c
@@ -156,486 +219,28 @@ func (d *Daemon) closeConnByDeviceID(deviceID string) {
 	}
 }
 
-// handleCommand processes one command from a CLI/UI client.
-func (d *Daemon) handleCommand(cmd Command) {
-	switch cmd.Cmd {
-	case "serve":
-		d.cmdServe(cmd.Port)
-	case "connect":
-		go d.cmdConnect(cmd.IP, cmd.Port)
-	case "pair_accept":
-		d.cmdPairAccept(cmd.DeviceID)
-	case "pair_reject":
-		d.cmdPairReject(cmd.DeviceID)
-	case "pair_pin":
-		go d.cmdPairPIN(cmd.PIN)
-	case "status":
-		d.cmdStatus()
-	case "disconnect":
-		d.cmdDisconnect(cmd.DeviceID)
-	case "stop_serve":
-		d.tcpSrv.Stop()
-		d.broadcast(Event{Event: "stopped"})
-		log.Println("[daemon] TCP listener stopped")
-	case "trust":
-		d.cmdTrust(cmd.DeviceID, cmd.Name)
-	case "untrust":
-		d.cmdUntrust(cmd.DeviceID)
-	case "trusted_list":
-		d.cmdTrustedList()
-	default:
-		d.broadcast(Event{Event: "error", Msg: fmt.Sprintf("unknown command: %s", cmd.Cmd)})
-	}
-}
-
-// Serve is the public entry point used by the daemon CLI flag --serve.
+// Serve starts the TCP listener on the given port (P2P + HTTP mux).
+// Called by cmdServe and the --serve flag.
 func (d *Daemon) Serve(port int) { d.cmdServe(port) }
 
-// Connect is the public entry point used by the daemon CLI flag --connect.
+// Connect dials a remote daemon (host role).
 func (d *Daemon) Connect(ip string, port int) { d.cmdConnect(ip, port) }
-
-func (d *Daemon) cmdServe(overridePort int) {
-	port := d.cfg.Port
-	if d.opts.TCPPort != 0 {
-		port = d.opts.TCPPort
-	}
-	if overridePort != 0 {
-		port = overridePort
-	}
-	if err := d.tcpSrv.Listen(port); err != nil {
-		log.Printf("[daemon] cmdServe error: %v", err)
-		d.broadcast(Event{Event: "error", Msg: err.Error()})
-		return
-	}
-	d.broadcast(Event{Event: "listening", Port: port})
-	log.Printf("[daemon] TCP listening on :%d", port)
-}
 
 func (d *Daemon) cmdConnect(ip string, port int) {
 	if port == 0 {
 		port = d.cfg.Port
 	}
 	d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("connecting to %s:%d ...", ip, port)})
-
-	c, err := mnet.Dial(ip, port)
+	c, err := transport.Dial(ip, port)
 	if err != nil {
 		d.broadcast(Event{Event: "error", Msg: err.Error()})
 		return
 	}
-	go d.runHostSession(c)
-}
-
-// cmdPairAccept accepts the pending pair request for the given device_id.
-// If deviceID is empty and there is exactly one pending request, it accepts that one.
-func (d *Daemon) cmdPairAccept(deviceID string) {
-	d.pairMu.Lock()
-	entry, deviceID := d.resolvePendingSlave(deviceID)
-	if entry == nil {
-		d.pairMu.Unlock()
-		d.broadcast(Event{Event: "error", Msg: "no pending pair request"})
-		return
-	}
-	delete(d.pendingPairs, deviceID)
-	d.pairMu.Unlock()
-
-	if err := entry.mgr.Accept(); err != nil {
-		d.broadcast(Event{Event: "error", Msg: err.Error()})
-		return
-	}
-	_ = entry.conn.Send(event.Message{
-		V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{},
-	})
-	d.broadcast(Event{Event: "paired", DeviceID: deviceID, Name: entry.name})
-	log.Printf("[daemon] paired with %s (id=%s) — to trust: mousebridge trust add %s --name '%s'", entry.name, deviceID, deviceID, entry.name)
-	go d.runSlaveSession(entry.conn, deviceID, entry.name)
-}
-
-// cmdPairReject rejects the pending pair request for the given device_id.
-// If deviceID is empty and there is exactly one pending request, it rejects that one.
-func (d *Daemon) cmdPairReject(deviceID string) {
-	d.pairMu.Lock()
-	entry, deviceID := d.resolvePendingSlave(deviceID)
-	if entry == nil {
-		d.pairMu.Unlock()
-		d.broadcast(Event{Event: "error", Msg: "no pending pair request"})
-		return
-	}
-	delete(d.pendingPairs, deviceID)
-	d.pairMu.Unlock()
-
-	_ = entry.mgr.Reject()
-	_ = entry.conn.Send(event.Message{
-		V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{},
-	})
-	d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("pairing rejected: %s", entry.name)})
-	entry.conn.Close()
-}
-
-// resolvePendingSlave looks up the entry by deviceID, or returns the only entry if deviceID is empty.
-// Must be called with pairMu held. Returns (nil, "") if not found or ambiguous.
-func (d *Daemon) resolvePendingSlave(deviceID string) (*pendingSlaveEntry, string) {
-	if deviceID != "" {
-		return d.pendingPairs[deviceID], deviceID
-	}
-	if len(d.pendingPairs) == 1 {
-		for id, e := range d.pendingPairs {
-			return e, id
-		}
-	}
-	return nil, ""
-}
-
-func (d *Daemon) cmdPairPIN(pin string) {
-	d.pairMu.Lock()
-	conn := d.pendingHostConn
-	d.pairMu.Unlock()
-	if conn == nil {
-		d.broadcast(Event{Event: "error", Msg: "no pending pairing (host side)"})
-		return
-	}
-	if err := conn.Send(event.Message{
-		V: 1, Seq: 3, Type: event.TypePairConfirm, Ts: nowMs(),
-		Payload: event.PairConfirmPayload{PIN: pin},
-	}); err != nil {
-		d.broadcast(Event{Event: "error", Msg: "pair_pin send: " + err.Error()})
-	}
-}
-
-func (d *Daemon) cmdStatus() {
-	devs := d.sess.Devices()
-	statuses := make([]DeviceStatus, 0, len(devs))
-	for _, dv := range devs {
-		statuses = append(statuses, DeviceStatus{
-			ID:           dv.ID,
-			Name:         dv.Name,
-			AvgLatencyMs: dv.AvgLatencyMs,
-		})
-	}
-	d.broadcast(Event{Event: "status", Devices: statuses})
-}
-
-func (d *Daemon) cmdDisconnect(deviceID string) {
-	d.closeConnByDeviceID(deviceID)
-}
-
-func (d *Daemon) cmdTrust(deviceID, name string) {
-	if deviceID == "" {
-		d.broadcast(Event{Event: "error", Msg: "device_id required"})
-		return
-	}
-	if err := d.trust.Add(deviceID, name); err != nil {
-		d.broadcast(Event{Event: "error", Msg: "trust: " + err.Error()})
-		return
-	}
-	d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("trusted: %s (%s)", name, deviceID)})
-	log.Printf("[daemon] trusted device %s (%s)", name, deviceID)
-}
-
-func (d *Daemon) cmdUntrust(deviceID string) {
-	if deviceID == "" {
-		d.broadcast(Event{Event: "error", Msg: "device_id required"})
-		return
-	}
-	if err := d.trust.Remove(deviceID); err != nil {
-		d.broadcast(Event{Event: "error", Msg: "untrust: " + err.Error()})
-		return
-	}
-	d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("untrusted: %s", deviceID)})
-}
-
-func (d *Daemon) cmdTrustedList() {
-	devs := d.trust.List()
-	statuses := make([]DeviceStatus, 0, len(devs))
-	for _, dv := range devs {
-		statuses = append(statuses, DeviceStatus{ID: dv.DeviceID, Name: dv.Name})
-	}
-	d.broadcast(Event{Event: "trusted_list", Devices: statuses})
-}
-
-// handleInbound is called by the TCP server for each incoming connection (slave role).
-func (d *Daemon) handleInbound(c *mnet.Conn) {
-	var peerDeviceID string
-	adopted := false
-	defer func() {
-		if peerDeviceID != "" {
-			d.pairMu.Lock()
-			delete(d.pendingPairs, peerDeviceID)
-			d.pairMu.Unlock()
-		}
-		if !adopted {
-			c.Close()
-		}
-	}()
-	remote := c.RemoteAddr().String()
-
-	hs, err := c.Recv()
-	if err != nil {
-		log.Printf("[daemon] handshake from %s: %v", remote, err)
-		return
-	}
-	var hsPay event.HandshakePayload
-	if err := event.DecodePayload(hs, &hsPay); err != nil || hs.Type != event.TypeHandshake {
-		return
-	}
-	_ = c.Send(event.Message{
-		V: 1, Seq: 1, Type: event.TypeHandshake, Ts: nowMs(),
-		Payload: event.HandshakePayload{DeviceID: d.cfg.DeviceID, Name: d.cfg.DeviceName, Platform: "macos"},
-	})
-
-	pairMsg, err := c.Recv()
-	if err != nil || pairMsg.Type != event.TypePairRequest {
-		return
-	}
-	var prPay event.PairRequestPayload
-	_ = event.DecodePayload(pairMsg, &prPay)
-
-	// Trusted device: skip PIN flow, auto-accept.
-	if d.trust.IsTrusted(prPay.DeviceID) {
-		_ = c.Send(event.Message{V: 1, Seq: 2, Type: event.TypePairPin, Ts: nowMs(), Payload: event.PairPinPayload{}})
-		_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
-		d.broadcast(Event{Event: "paired", DeviceID: prPay.DeviceID, Name: prPay.Name})
-		log.Printf("[daemon] trusted device %s auto-accepted", prPay.Name)
-		adopted = true
-		go d.runSlaveSession(c, prPay.DeviceID, prPay.Name)
-		return
-	}
-
-	mgr := pairing.NewManager()
-	pin, err := mgr.StartAsSlave(prPay.DeviceID, prPay.Name)
-	if err != nil {
-		return
-	}
-
-	peerDeviceID = prPay.DeviceID
-	entry := &pendingSlaveEntry{mgr: mgr, conn: c, name: prPay.Name}
-	d.pairMu.Lock()
-	d.pendingPairs[peerDeviceID] = entry
-	d.pairMu.Unlock()
-
-	// Send pair_pin without the PIN — host must get it out-of-band from the user on this side.
-	_ = c.Send(event.Message{
-		V: 1, Seq: 2, Type: event.TypePairPin, Ts: nowMs(),
-		Payload: event.PairPinPayload{},
-	})
-	d.broadcast(Event{Event: "pair_request", DeviceID: prPay.DeviceID, Name: prPay.Name, PIN: pin, Role: "slave"})
-	log.Printf("[daemon] pair_request from %s (id=%s) — PIN: %s", prPay.Name, prPay.DeviceID, pin)
-
-	type confirmResult struct{ pin string }
-	confirmCh := make(chan confirmResult, 1)
-	go func() {
-		for {
-			msg, err := c.Recv()
-			if err != nil {
-				return
-			}
-			if msg.Type == event.TypePairConfirm {
-				var pay event.PairConfirmPayload
-				_ = event.DecodePayload(msg, &pay)
-				confirmCh <- confirmResult{pay.PIN}
-				return
-			}
-		}
-	}()
-
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	timeout := time.After(60 * time.Second)
-	for {
-		select {
-		case <-timeout:
-			d.broadcast(Event{Event: "error", Msg: "pairing timed out"})
-			_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{}})
-			d.pairMu.Lock()
-			delete(d.pendingPairs, peerDeviceID)
-			d.pairMu.Unlock()
-			peerDeviceID = ""
-			return
-
-		case res := <-confirmCh:
-			if err := mgr.ConfirmPIN(res.pin); err != nil {
-				_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{}})
-				d.broadcast(Event{Event: "error", Msg: "wrong PIN"})
-				d.pairMu.Lock()
-				delete(d.pendingPairs, peerDeviceID)
-				d.pairMu.Unlock()
-				peerDeviceID = ""
-				return
-			}
-			_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
-			d.broadcast(Event{Event: "paired", DeviceID: prPay.DeviceID, Name: prPay.Name})
-			d.pairMu.Lock()
-			delete(d.pendingPairs, peerDeviceID)
-			d.pairMu.Unlock()
-			peerDeviceID = ""
-			adopted = true
-			go d.runSlaveSession(c, prPay.DeviceID, prPay.Name)
-			return
-
-		case <-ticker.C:
-			state := mgr.State()
-			if state == pairing.StatePaired {
-				adopted = true
-				peerDeviceID = ""
-				return
-			}
-			if state == pairing.StateRejected {
-				return
-			}
-		}
-	}
-}
-
-// runHostSession runs after dialing a remote daemon (host role).
-func (d *Daemon) runHostSession(c *mnet.Conn) {
-	d.trackConn(c, "")
-	defer d.untrackConn(c)
-	defer c.Close()
-
-	if err := c.Send(event.Message{
-		V: 1, Seq: 1, Type: event.TypeHandshake, Ts: nowMs(),
-		Payload: event.HandshakePayload{DeviceID: d.cfg.DeviceID, Name: d.cfg.DeviceName, Platform: "macos"},
-	}); err != nil {
-		d.broadcast(Event{Event: "error", Msg: "handshake: " + err.Error()})
-		return
-	}
-	hsReply, err := c.Recv()
-	if err != nil || hsReply.Type != event.TypeHandshake {
-		d.broadcast(Event{Event: "error", Msg: "handshake reply failed"})
-		return
-	}
-	var hsPay event.HandshakePayload
-	_ = event.DecodePayload(hsReply, &hsPay)
-	remoteName := hsPay.Name
-	remoteID := hsPay.DeviceID
-	d.trackConn(c, remoteID)
-
-	if err := c.Send(event.Message{
-		V: 1, Seq: 2, Type: event.TypePairRequest, Ts: nowMs(),
-		Payload: event.PairRequestPayload{DeviceID: d.cfg.DeviceID, Name: d.cfg.DeviceName},
-	}); err != nil {
-		d.broadcast(Event{Event: "error", Msg: err.Error()})
-		return
-	}
-
-	pinMsg, err := c.Recv()
-	if err != nil || pinMsg.Type != event.TypePairPin {
-		d.broadcast(Event{Event: "error", Msg: "expected pair_pin"})
-		return
-	}
-	var pinPay event.PairPinPayload
-	_ = event.DecodePayload(pinMsg, &pinPay)
-	d.broadcast(Event{Event: "pair_request", DeviceID: remoteID, Name: remoteName, Role: "host"})
-	log.Printf("[daemon] pairing with %s — enter PIN shown on remote device", remoteName)
-
-	d.pairMu.Lock()
-	d.pendingHostConn = c
-	d.pairMu.Unlock()
-	defer func() {
-		d.pairMu.Lock()
-		if d.pendingHostConn == c {
-			d.pendingHostConn = nil
-		}
-		d.pairMu.Unlock()
-	}()
-
-	pairResult, err := c.Recv()
-	if err != nil {
-		d.broadcast(Event{Event: "error", Msg: "pairing connection lost"})
-		return
-	}
-	if pairResult.Type == event.TypePairReject {
-		d.broadcast(Event{Event: "error", Msg: "pairing rejected by remote"})
-		return
-	}
-	if pairResult.Type != event.TypePairAccept {
-		d.broadcast(Event{Event: "error", Msg: "unexpected pairing message: " + pairResult.Type})
-		return
-	}
-
-	d.broadcast(Event{Event: "paired", DeviceID: remoteID, Name: remoteName})
-	d.sess.Add(remoteID, remoteName, c.RemoteAddr().String())
-	d.broadcast(Event{Event: "connected", DeviceID: remoteID, Name: remoteName, IP: c.RemoteAddr().String()})
-	log.Printf("[daemon] connected to %s (%s)", remoteName, c.RemoteAddr())
-
-	var seq int64 = 3
-	for {
-		msg, err := c.Recv()
-		if err != nil {
-			d.broadcast(Event{Event: "disconnected", DeviceID: remoteID, Name: remoteName})
-			d.sess.Remove(remoteID)
-			return
-		}
-		latency := float64(nowMs() - msg.Ts)
-		d.sess.RecordLatency(remoteID, latency)
-		switch msg.Type {
-		case event.TypePong:
-			var pay event.PongPayload
-			_ = event.DecodePayload(msg, &pay)
-			rtt := float64(nowMs() - pay.EchoTs)
-			d.sess.RecordLatency(remoteID, rtt)
-			d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("pong rtt=%.1fms", rtt)})
-		case event.TypeSwitchAck:
-			d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("switch_ack from %s", remoteName)})
-		default:
-			d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("recv %s latency=%.1fms", msg.Type, latency)})
-		}
-		seq++
-	}
-}
-
-// runSlaveSession runs the event loop after pairing on the slave side.
-func (d *Daemon) runSlaveSession(c *mnet.Conn, peerID, peerName string) {
-	d.trackConn(c, peerID)
-	defer d.untrackConn(c)
-	defer c.Close()
-	d.sess.Add(peerID, peerName, c.RemoteAddr().String())
-	d.broadcast(Event{Event: "connected", DeviceID: peerID, Name: peerName, IP: c.RemoteAddr().String()})
-	log.Printf("[daemon] slave session started with %s (id=%s)", peerName, peerID)
-
-	var seq int64 = 4
-	for {
-		msg, err := c.Recv()
-		if err != nil {
-			d.broadcast(Event{Event: "disconnected", DeviceID: peerID, Name: peerName})
-			d.sess.Remove(peerID)
-			return
-		}
-		latency := float64(nowMs() - msg.Ts)
-		d.sess.RecordLatency(peerID, latency)
-		switch msg.Type {
-		case event.TypePing:
-			_ = c.Send(event.Message{
-				V: 1, Seq: seq, Type: event.TypePong, Ts: nowMs(),
-				Payload: event.PongPayload{EchoTs: msg.Ts},
-			})
-			d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("recv ping latency=%.1fms", latency)})
-			seq++
-		case event.TypeSwitchRequest:
-			var pay event.SwitchRequestPayload
-			_ = event.DecodePayload(msg, &pay)
-			d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("recv switch_request trigger=%s entry=%s@%.0f%% latency=%.1fms",
-				pay.Trigger, pay.Edge, pay.EntryPct*100, latency)})
-			d.ctrl.SwitchTo(peerID)
-			_ = c.Send(event.Message{V: 1, Seq: seq, Type: event.TypeSwitchAck, Ts: nowMs(), Payload: struct{}{}})
-			seq++
-		default:
-			d.broadcast(Event{Event: "log", Msg: fmt.Sprintf("recv %s latency=%.1fms", msg.Type, latency)})
-		}
-	}
-}
-
-// SetHTTPServer injects an HTTP server that will be started/stopped with the daemon.
-func (d *Daemon) SetHTTPServer(srv interface {
-	Start() error
-	Stop()
-}) {
-	d.httpSrv = srv
+	go p2p.RunHostSession(c, d.cfg.DeviceID, d.cfg.DeviceName, d, d.emitP2PEvent)
 }
 
 // HandleCommand is the public entry point for REST/UI callers.
-func (d *Daemon) HandleCommand(cmd Command) {
-	d.handleCommand(cmd)
-}
+func (d *Daemon) HandleCommand(cmd Command) { d.handleCommand(cmd) }
 
 // Subscribe returns a channel that receives every broadcasted Event.
 func (d *Daemon) Subscribe() chan Event {
@@ -646,7 +251,7 @@ func (d *Daemon) Subscribe() chan Event {
 	return ch
 }
 
-// Unsubscribe removes the channel from the subscriber set and closes it.
+// Unsubscribe removes the channel and closes it.
 func (d *Daemon) Unsubscribe(ch chan Event) {
 	d.subsMu.Lock()
 	delete(d.subs, ch)
@@ -656,14 +261,12 @@ func (d *Daemon) Unsubscribe(ch chan Event) {
 
 func (d *Daemon) broadcast(ev Event) {
 	d.ipc.Broadcast(ev)
-
 	d.subsMu.RLock()
 	subs := make([]chan Event, 0, len(d.subs))
 	for ch := range d.subs {
 		subs = append(subs, ch)
 	}
 	d.subsMu.RUnlock()
-
 	for _, ch := range subs {
 		select {
 		case ch <- ev:
@@ -679,7 +282,7 @@ type DaemonState struct {
 	Devices []DeviceStatus `json:"devices"`
 }
 
-// State returns a consistent snapshot of the daemon's current state.
+// State returns a consistent snapshot.
 func (d *Daemon) State() DaemonState {
 	devs := d.sess.Devices()
 	statuses := make([]DeviceStatus, 0, len(devs))
@@ -691,22 +294,19 @@ func (d *Daemon) State() DaemonState {
 			AvgLatencyMs: dv.AvgLatencyMs,
 		})
 	}
+	serving, port := d.servingState()
 	return DaemonState{
-		Serving: d.tcpSrv.IsListening(),
-		Port:    d.tcpSrv.Port(),
+		Serving: serving,
+		Port:    port,
 		Devices: statuses,
 	}
 }
 
 // Config returns the daemon's current configuration.
-func (d *Daemon) Config() *config.Config {
-	return d.cfg
-}
+func (d *Daemon) Config() *config.Config { return d.cfg }
 
 // TrustedList returns all trusted devices.
-func (d *Daemon) TrustedList() []trusted.Device {
-	return d.trust.List()
-}
+func (d *Daemon) TrustedList() []trusted.Device { return d.trust.List() }
 
 // UpdateHotkeys replaces the hotkey config and saves to disk if configPath is set.
 func (d *Daemon) UpdateHotkeys(h config.Hotkeys) error {
@@ -717,6 +317,4 @@ func (d *Daemon) UpdateHotkeys(h config.Hotkeys) error {
 	return nil
 }
 
-func nowMs() int64 {
-	return time.Now().UnixMilli()
-}
+
