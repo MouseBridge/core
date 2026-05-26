@@ -2,9 +2,9 @@
 
 在局域网内的两台 Mac 之间共享鼠标和键盘操作。
 
-> **当前状态：Step 1 — 通信层**
-> 已实现守护进程架构 + 设备配对 + 事件转发 + 延迟日志。
-> 尚未实现真实的输入注入（Step 3），鼠标/键盘事件目前仅做记录和转发。
+> **当前状态：通信层 + HTTP API + 浏览器 UI 完成**
+> 已实现守护进程架构 + 设备配对 + 单端口 P2P/HTTP 多路复用 + 延迟日志 + 可信设备持久化 + 浏览器 UI。
+> 尚未实现真实的输入注入，鼠标/键盘事件目前仅做记录和转发。
 
 ---
 
@@ -204,17 +204,16 @@ mousebridge daemon [-p <port>] [--serve] [--connect <ip> ...]
   "hotkeys": {
     "switch_right": "ctrl+alt+right",
     "switch_left": "ctrl+alt+left"
-  },
-  "trusted_devices_file": "~/.mousebridge/trusted.json"
+  }
 }
 ```
 
 | 字段 | 说明 |
 |------|------|
-| `port` | TCP 通信端口 |
+| `port` | TCP 端口（P2P 设备互联 + HTTP API 共用） |
 | `device_name` | 本机在对端显示的名称（默认取主机名） |
-| `hotkeys.switch_right` | 切换到右侧设备的快捷键（Step 3 实现） |
-| `hotkeys.switch_left` | 切换到左侧设备的快捷键（Step 3 实现） |
+| `hotkeys.switch_right` | 切换到右侧设备的快捷键（helper 实现后生效） |
+| `hotkeys.switch_left` | 切换到左侧设备的快捷键（helper 实现后生效） |
 
 ---
 
@@ -223,20 +222,22 @@ mousebridge daemon [-p <port>] [--serve] [--connect <ip> ...]
 | 功能 | 状态 |
 |------|------|
 | 守护进程 + Unix Socket IPC | ✅ |
-| TCP 设备互联（JSON Lines 协议） | ✅ |
+| 单端口 TCP（P2P + HTTP API 多路复用） | ✅ |
+| P2P JSON Lines 协议 | ✅ |
 | 配对：PIN 码 + 接受/拒绝 | ✅ |
+| 可信设备持久化（免 PIN 自动接受） | ✅ |
 | 多设备同时连接 | ✅ |
 | 运行时追加/断开连接 | ✅ |
 | 本地多进程测试（按端口隔离） | ✅ |
 | 延迟统计（rolling 20 样本均值） | ✅ |
+| HTTP API + SSE 事件流（Gin） | ✅ |
+| 浏览器 UI（React SPA） | ✅ |
+| 快捷键配置 API | ✅ |
 | 鼠标边界切换（事件转发，无注入） | ✅ |
-| 真实鼠标/键盘注入 | 🔜 Step 3 |
-| 图形界面 | 🔜 Step 2 |
-| 可信设备持久化 | 🔜 Step 2 |
+| 真实鼠标/键盘注入 | 🔜 需要 helper |
 
 ---
 
 ## 开发计划
 
-- **Step 2**：图形 UI，设备管理，布局配置。UI 通过同一 Unix Socket 接入守护进程，无需修改协议。
-- **Step 3**：macOS 真实输入注入（CGo + Accessibility API），替换当前的事件日志占位实现。
+- **下一步**：`helper` — macOS 系统级进程，CGEventTap 全局快捷键捕获 + `CGEventPost` 鼠标/键盘注入，通过 Unix Socket 接入 daemon。
