@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -48,27 +47,18 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	})
 
 	apiSrv := api.New(d)
-
-	if doServe {
-		// Host: P2P + HTTP share the same TCP port via mux.
-		httpLn := api.NewChanListener(d.HTTPConnCh(), &net.TCPAddr{IP: net.IPv4zero, Port: port})
-		apiSrv.Start(httpLn)
-	} else {
-		// Client: no P2P inbound needed, open a plain TCP listener for HTTP only.
-		httpLn, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
-		if err != nil {
-			return fmt.Errorf("daemon: http listen: %w", err)
-		}
-		apiSrv.Start(httpLn)
-	}
+	httpLn := api.NewChanListener(d.HTTPConnCh(), &net.TCPAddr{IP: net.IPv4zero, Port: port})
+	apiSrv.Start(httpLn)
 
 	if err := d.Start(); err != nil {
 		return err
 	}
 	log.Printf("[daemon] started — port=%d socket=%s device=%s", port, socketPath, cfg.DeviceName)
 
+	// Always open TCP (P2P + HTTP mux). --serve means auto-start host mode.
+	d.Serve(port)
 	if doServe {
-		d.Serve(port)
+		d.HandleCommand(daemon.Command{Cmd: "serve"})
 	}
 	for _, ip := range connectIPs {
 		go d.Connect(ip, 0)
@@ -79,7 +69,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	<-sigCh
 
 	log.Println("[daemon] shutting down...")
+	log.Println("[daemon] stopping api server...")
 	apiSrv.Stop()
+	log.Println("[daemon] api server stopped, stopping daemon...")
 	d.Stop()
+	log.Println("[daemon] done")
 	return nil
 }
