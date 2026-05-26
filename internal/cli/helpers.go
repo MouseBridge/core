@@ -77,7 +77,7 @@ func printEvent(ev daemon.Event) {
 			log.Printf("[pair] run: mousebridge pair accept %s  OR  mousebridge pair reject %s", ev.DeviceID, ev.DeviceID)
 		} else {
 			// host side: user must get PIN from remote
-			log.Printf("[pair] pairing with %s — run: mousebridge pair pin <PIN> -p <port>", ev.Name)
+			log.Printf("[pair] pairing with %s — run: mousebridge pair pin <PIN>", ev.Name)
 		}
 	case "paired":
 		log.Printf("[pair] paired with %s", ev.Name)

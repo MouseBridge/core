@@ -12,7 +12,6 @@ func TrustCmd() *cobra.Command {
 		Use:   "trust",
 		Short: "Manage trusted devices (auto-connect without PIN)",
 	}
-	cmd.PersistentFlags().IntP("port", "p", 0, "daemon socket port")
 	cmd.AddCommand(trustAddCmd())
 	cmd.AddCommand(trustRemoveCmd())
 	cmd.AddCommand(trustListCmd())

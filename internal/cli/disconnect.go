@@ -19,6 +19,5 @@ func DisconnectCmd() *cobra.Command {
 			return daemon.SendCommand(conn, daemon.Command{Cmd: "disconnect", DeviceID: args[0]})
 		},
 	}
-	cmd.Flags().IntP("port", "p", 0, "TCP port of target daemon (default: from config)")
 	return cmd
 }

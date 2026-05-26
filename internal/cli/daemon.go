@@ -20,7 +20,6 @@ func DaemonCmd() *cobra.Command {
 		Short: "Start the background daemon",
 		RunE:  runDaemon,
 	}
-	cmd.Flags().IntP("port", "p", 0, "TCP port for P2P and HTTP API (default: from config)")
 	cmd.Flags().Bool("serve", false, "start listening for incoming connections on startup")
 	cmd.Flags().StringArray("connect", nil, "connect to remote device IP on startup (repeatable)")
 	return cmd
@@ -28,7 +27,6 @@ func DaemonCmd() *cobra.Command {
 
 func runDaemon(cmd *cobra.Command, args []string) error {
 	socketPath := socketFlag(cmd)
-	port, _ := cmd.Flags().GetInt("port")
 	doServe, _ := cmd.Flags().GetBool("serve")
 	connectIPs, _ := cmd.Flags().GetStringArray("connect")
 
@@ -36,9 +34,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		cfg = config.Default()
 	}
-	if port == 0 {
-		port = envPort()
-	}
+	port := envPort()
 	if port == 0 {
 		port = cfg.Port
 	}

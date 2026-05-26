@@ -20,7 +20,6 @@ func ConnectCmd() *cobra.Command {
 			return daemon.SendCommand(conn, daemon.Command{Cmd: "connect", IP: args[0], Port: targetPort})
 		},
 	}
-	cmd.Flags().IntP("port", "p", 0, "local daemon TCP port, also selects the daemon socket")
-	cmd.Flags().Int("target-port", 0, "TCP port on the remote device (default: same as local daemon port)")
+	cmd.Flags().Int("target-port", 0, "TCP port on the remote device (default: same as local port)")
 	return cmd
 }

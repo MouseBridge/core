@@ -18,6 +18,5 @@ func StopServeCmd() *cobra.Command {
 			return daemon.SendCommand(conn, daemon.Command{Cmd: "stop_serve"})
 		},
 	}
-	cmd.Flags().IntP("port", "p", 0, "TCP port of target daemon (default: from config)")
 	return cmd
 }
