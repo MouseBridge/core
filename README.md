@@ -193,6 +193,65 @@ mousebridge daemon [-p <port>] [--serve] [--connect <ip> ...]
 
 ---
 
+## HTTP API
+
+daemon 启动后（需先 `--serve` 或 `mousebridge serve`），HTTP API 与 P2P 共用同一端口，路径前缀 `/api`。
+
+### 设备控制
+
+| 方法 | 路径 | 请求体 | 说明 |
+|------|------|--------|------|
+| `POST` | `/api/serve` | `{"port": 0}` | 开始监听入站连接（port 为 0 时用配置默认值） |
+| `POST` | `/api/stop-serve` | — | 停止监听 |
+| `POST` | `/api/connect` | `{"ip": "192.168.1.6", "port": 39172}` | 连接到远端 daemon |
+| `POST` | `/api/disconnect` | `{"device_id": "..."}` | 断开指定设备 |
+| `GET`  | `/api/status` | — | 当前状态快照（serving、port、devices） |
+
+### 配对
+
+| 方法 | 路径 | 请求体 | 说明 |
+|------|------|--------|------|
+| `POST` | `/api/pair/accept` | `{"device_id": "..."}` | 接受配对请求（从机侧） |
+| `POST` | `/api/pair/reject` | `{"device_id": "..."}` | 拒绝配对请求（从机侧） |
+| `POST` | `/api/pair/pin` | `{"pin": "123456"}` | 提交 PIN（主机侧） |
+
+### 信任设备
+
+| 方法 | 路径 | 请求体 | 说明 |
+|------|------|--------|------|
+| `GET`    | `/api/trusted` | — | 列出所有已信任设备 |
+| `POST`   | `/api/trusted` | `{"device_id": "...", "name": "..."}` | 添加信任 |
+| `DELETE` | `/api/trusted` | `{"device_id": "..."}` | 撤销信任 |
+
+### 快捷键
+
+| 方法 | 路径 | 请求体 | 说明 |
+|------|------|--------|------|
+| `GET` | `/api/shortcuts` | — | 读取当前快捷键配置 |
+| `PUT` | `/api/shortcuts` | `{"switch_right": "ctrl+alt+right", ...}` | 更新快捷键并推送到 helper |
+
+### 事件流（SSE）
+
+```
+GET /api/events
+```
+
+长连接，返回 `text/event-stream`。每个事件为 `event: message\ndata: <JSON>\n\n`。
+
+| `event` 字段 | 触发时机 | 主要字段 |
+|-------------|---------|---------|
+| `listening` | 开始监听 | `port` |
+| `pair_request` | 收到配对请求 | `device_id`, `name`, `pin`（从机侧有 pin），`role` |
+| `paired` | 配对完成 | `device_id`, `name` |
+| `connected` | 设备连接建立 | `device_id`, `name`, `ip` |
+| `disconnected` | 设备断开 | `device_id`, `name` |
+| `status` | status 查询响应 | `devices[]` |
+| `trusted_list` | trusted list 查询响应 | `devices[]` |
+| `log` | 普通日志 | `msg` |
+| `error` | 错误 | `msg` |
+
+---
+
 ## 配置文件
 
 路径：`~/.mousebridge/config.json`，不存在时自动使用默认值。
