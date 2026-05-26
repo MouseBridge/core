@@ -21,6 +21,7 @@ import (
 type Options struct {
 	SocketPath string
 	TCPPort    int
+	DeviceID   string
 	DeviceName string
 	HTTPHost   string
 	HTTPPort   int
@@ -63,11 +64,18 @@ type Daemon struct {
 // New creates a Daemon with the given options.
 func New(opts Options) *Daemon {
 	cfg := config.Default()
+	if opts.DeviceID != "" {
+		cfg.DeviceID = opts.DeviceID
+	}
 	if opts.DeviceName != "" {
 		cfg.DeviceName = opts.DeviceName
 	}
 	if opts.TCPPort != 0 {
 		cfg.Port = opts.TCPPort
+		// Recompute ID when port is overridden via CLI flag.
+		if opts.DeviceID == "" {
+			cfg.DeviceID = config.DeriveDeviceID(cfg.Port)
+		}
 	}
 	trustStore, err := trusted.New(cfg.TrustedDevicesFile)
 	if err != nil {
@@ -238,7 +246,7 @@ func (d *Daemon) cmdPairAccept(deviceID string) {
 		V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{},
 	})
 	d.broadcast(Event{Event: "paired", DeviceID: deviceID, Name: entry.name})
-	log.Printf("[daemon] paired with %s (accept)", entry.name)
+	log.Printf("[daemon] paired with %s (id=%s) — to trust: mousebridge trust add %s --name '%s'", entry.name, deviceID, deviceID, entry.name)
 	go d.runSlaveSession(entry.conn, deviceID, entry.name)
 }
 
@@ -371,7 +379,7 @@ func (d *Daemon) handleInbound(c *mnet.Conn) {
 	}
 	_ = c.Send(event.Message{
 		V: 1, Seq: 1, Type: event.TypeHandshake, Ts: nowMs(),
-		Payload: event.HandshakePayload{DeviceID: "local", Name: d.cfg.DeviceName, Platform: "macos"},
+		Payload: event.HandshakePayload{DeviceID: d.cfg.DeviceID, Name: d.cfg.DeviceName, Platform: "macos"},
 	})
 
 	pairMsg, err := c.Recv()
@@ -410,7 +418,7 @@ func (d *Daemon) handleInbound(c *mnet.Conn) {
 		Payload: event.PairPinPayload{},
 	})
 	d.broadcast(Event{Event: "pair_request", DeviceID: prPay.DeviceID, Name: prPay.Name, PIN: pin, Role: "slave"})
-	log.Printf("[daemon] pair_request from %s — PIN: %s", prPay.Name, pin)
+	log.Printf("[daemon] pair_request from %s (id=%s) — PIN: %s", prPay.Name, prPay.DeviceID, pin)
 
 	type confirmResult struct{ pin string }
 	confirmCh := make(chan confirmResult, 1)
@@ -485,7 +493,7 @@ func (d *Daemon) runHostSession(c *mnet.Conn) {
 
 	if err := c.Send(event.Message{
 		V: 1, Seq: 1, Type: event.TypeHandshake, Ts: nowMs(),
-		Payload: event.HandshakePayload{DeviceID: "local", Name: d.cfg.DeviceName, Platform: "macos"},
+		Payload: event.HandshakePayload{DeviceID: d.cfg.DeviceID, Name: d.cfg.DeviceName, Platform: "macos"},
 	}); err != nil {
 		d.broadcast(Event{Event: "error", Msg: "handshake: " + err.Error()})
 		return
@@ -503,7 +511,7 @@ func (d *Daemon) runHostSession(c *mnet.Conn) {
 
 	if err := c.Send(event.Message{
 		V: 1, Seq: 2, Type: event.TypePairRequest, Ts: nowMs(),
-		Payload: event.PairRequestPayload{DeviceID: "local", Name: d.cfg.DeviceName},
+		Payload: event.PairRequestPayload{DeviceID: d.cfg.DeviceID, Name: d.cfg.DeviceName},
 	}); err != nil {
 		d.broadcast(Event{Event: "error", Msg: err.Error()})
 		return
@@ -582,7 +590,7 @@ func (d *Daemon) runSlaveSession(c *mnet.Conn, peerID, peerName string) {
 	defer c.Close()
 	d.sess.Add(peerID, peerName, c.RemoteAddr().String())
 	d.broadcast(Event{Event: "connected", DeviceID: peerID, Name: peerName, IP: c.RemoteAddr().String()})
-	log.Printf("[daemon] slave session started with %s", peerName)
+	log.Printf("[daemon] slave session started with %s (id=%s)", peerName, peerID)
 
 	var seq int64 = 4
 	for {

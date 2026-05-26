@@ -46,6 +46,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	d := daemon.New(daemon.Options{
 		SocketPath: socketPath,
 		TCPPort:    port,
+		DeviceID:   cfg.DeviceID,
 		DeviceName: cfg.DeviceName,
 	})
 

@@ -1,8 +1,11 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -17,7 +20,9 @@ type Hotkeys struct {
 }
 
 // Config holds all user-configurable settings.
+// DeviceID is derived from hostname+port and must not be modified by users.
 type Config struct {
+	DeviceID           string  `json:"device_id"`
 	Port               int     `json:"port"`
 	DeviceName         string  `json:"device_name"`
 	Hotkeys            Hotkeys `json:"hotkeys"`
@@ -29,7 +34,7 @@ type Config struct {
 // Default returns a Config with sensible defaults.
 func Default() *Config {
 	home, _ := os.UserHomeDir()
-	return &Config{
+	cfg := &Config{
 		Port:       39172,
 		DeviceName: hostname(),
 		Hotkeys: Hotkeys{
@@ -41,6 +46,16 @@ func Default() *Config {
 		HTTPHost:           "127.0.0.1",
 		HTTPPort:           39173,
 	}
+	cfg.DeviceID = DeriveDeviceID(cfg.Port)
+	return cfg
+}
+
+// DeriveDeviceID computes a stable 8-char ID from hostname + port.
+// Same machine, different port → different ID. Deterministic across restarts.
+func DeriveDeviceID(port int) string {
+	h, _ := os.Hostname()
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", h, port)))
+	return hex.EncodeToString(sum[:4])
 }
 
 // Load reads a Config from path. Returns Default() if the file does not exist.
@@ -56,6 +71,8 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	// Always recompute — ignore any device_id written to disk.
+	cfg.DeviceID = DeriveDeviceID(cfg.Port)
 	return cfg, nil
 }
 
