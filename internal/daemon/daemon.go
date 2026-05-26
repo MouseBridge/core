@@ -115,8 +115,8 @@ func (d *Daemon) HTTPConnCh() <-chan net.Conn {
 	return d.httpConnCh
 }
 
-// handleHTTP is called by the mux for each HTTP connection.
-func (d *Daemon) handleHTTP(c net.Conn) {
+// HandleHTTP is called by the mux for each HTTP connection.
+func (d *Daemon) HandleHTTP(c net.Conn) {
 	select {
 	case d.httpConnCh <- c:
 	default:
@@ -125,8 +125,8 @@ func (d *Daemon) handleHTTP(c net.Conn) {
 	}
 }
 
-// handleP2P is called by the mux for each P2P connection.
-func (d *Daemon) handleP2P(c *transport.Conn) {
+// HandleP2P is called by the mux for each P2P connection.
+func (d *Daemon) HandleP2P(c *transport.Conn) {
 	go p2p.HandleInbound(c, d, d, d.emitP2PEvent)
 }
 

@@ -1,15 +1,19 @@
 package cli
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/mousebridge/core/internal/api"
 	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/daemon"
-	"github.com/mousebridge/core/internal/httpapi"
+	"github.com/mousebridge/core/internal/transport"
 )
 
 func DaemonCmd() *cobra.Command {
@@ -18,8 +22,7 @@ func DaemonCmd() *cobra.Command {
 		Short: "Start the background daemon",
 		RunE:  runDaemon,
 	}
-	cmd.Flags().IntP("port", "p", 0, "TCP port (default: from config)")
-	cmd.Flags().Int("http-port", 0, "HTTP API port (default: from config)")
+	cmd.Flags().IntP("port", "p", 0, "TCP port for P2P and HTTP API (default: from config)")
 	cmd.Flags().Bool("serve", false, "start listening for incoming connections on startup")
 	cmd.Flags().StringArray("connect", nil, "connect to remote device IP on startup (repeatable)")
 	return cmd
@@ -28,7 +31,6 @@ func DaemonCmd() *cobra.Command {
 func runDaemon(cmd *cobra.Command, args []string) error {
 	socketPath := socketFlag(cmd)
 	port, _ := cmd.Flags().GetInt("port")
-	httpPort, _ := cmd.Flags().GetInt("http-port")
 	doServe, _ := cmd.Flags().GetBool("serve")
 	connectIPs, _ := cmd.Flags().GetStringArray("connect")
 
@@ -39,9 +41,6 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if port == 0 {
 		port = cfg.Port
 	}
-	if httpPort != 0 {
-		cfg.HTTPPort = httpPort
-	}
 
 	d := daemon.New(daemon.Options{
 		SocketPath: socketPath,
@@ -50,22 +49,27 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		DeviceName: cfg.DeviceName,
 	})
 
-	httpHost := cfg.HTTPHost
-	if httpHost == "" {
-		httpHost = "127.0.0.1"
+	// Single shared listener for both P2P and HTTP traffic.
+	ln, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
+	if err != nil {
+		return fmt.Errorf("daemon: listen :%d: %w", port, err)
 	}
-	if cfg.HTTPPort != 0 {
-		d.SetHTTPServer(httpapi.New(d, httpHost, cfg.HTTPPort))
-		log.Printf("[daemon] HTTP API will listen on %s:%d", httpHost, cfg.HTTPPort)
-	}
+
+	// Start HTTP API server on the channel-based listener.
+	apiSrv := api.New(d)
+	httpLn := api.NewChanListener(d.HTTPConnCh(), ln.Addr())
+	apiSrv.Start(httpLn)
+
+	// Mux: dispatch P2P vs HTTP from the single TCP listener.
+	go transport.Serve(ln, d.HandleP2P, d.HandleHTTP)
 
 	if err := d.Start(); err != nil {
 		return err
 	}
-	log.Printf("[daemon] started — socket=%s port=%d device=%s", socketPath, port, cfg.DeviceName)
+	log.Printf("[daemon] started — port=%d socket=%s device=%s", port, socketPath, cfg.DeviceName)
 
 	if doServe {
-		d.Serve(0)
+		d.Serve(port)
 	}
 	for _, ip := range connectIPs {
 		go d.Connect(ip, 0)
@@ -76,6 +80,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	<-sigCh
 
 	log.Println("[daemon] shutting down...")
+	_ = ln.Close()
+	apiSrv.Stop()
 	d.Stop()
 	return nil
 }

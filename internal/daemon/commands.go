@@ -75,7 +75,7 @@ func (d *Daemon) cmdServe(overridePort int) {
 	d.broadcast(Event{Event: "listening", Port: actualPort})
 	log.Printf("[daemon] TCP listening on :%d", actualPort)
 
-	go transport.Serve(ln, d.handleP2P, d.handleHTTP)
+	go transport.Serve(ln, d.HandleP2P, d.HandleHTTP)
 }
 
 func (d *Daemon) cmdStopServe() {

@@ -78,6 +78,28 @@ func (s *Server) fanOutEvents() {
 	}
 }
 
+// NewChanListener wraps a channel of net.Conn as a net.Listener.
+// Used to feed HTTP connections dispatched by transport.Serve into the Gin server.
+func NewChanListener(ch <-chan net.Conn, addr net.Addr) net.Listener {
+	return &chanListener{ch: ch, addr: addr}
+}
+
+type chanListener struct {
+	ch   <-chan net.Conn
+	addr net.Addr
+}
+
+func (l *chanListener) Accept() (net.Conn, error) {
+	c, ok := <-l.ch
+	if !ok {
+		return nil, net.ErrClosed
+	}
+	return c, nil
+}
+
+func (l *chanListener) Close() error   { return nil }
+func (l *chanListener) Addr() net.Addr { return l.addr }
+
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
