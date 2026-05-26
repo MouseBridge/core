@@ -136,8 +136,12 @@ func HandleInbound(c *transport.Conn, h InboundHost, sessionHost Host, emit func
 		case <-ticker.C:
 			state := mgr.State()
 			if state == pairing.StatePaired {
-				adopted = true
+				_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
+				emit(Event{Kind: "paired", DeviceID: prPay.DeviceID, Name: prPay.Name})
+				h.RemovePendingSlave(peerDeviceID)
 				peerDeviceID = ""
+				adopted = true
+				go RunSlaveSession(c, prPay.DeviceID, prPay.Name, sessionHost, emit)
 				return
 			}
 			if state == pairing.StateRejected {

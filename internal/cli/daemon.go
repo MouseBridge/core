@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -13,7 +12,6 @@ import (
 	"github.com/mousebridge/core/internal/api"
 	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/daemon"
-	"github.com/mousebridge/core/internal/transport"
 )
 
 func DaemonCmd() *cobra.Command {
@@ -49,25 +47,17 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		DeviceName: cfg.DeviceName,
 	})
 
-	// Single shared listener for both P2P and HTTP traffic.
-	ln, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
-	if err != nil {
-		return fmt.Errorf("daemon: listen :%d: %w", port, err)
-	}
-
-	// Start HTTP API server on the channel-based listener.
+	// Start HTTP API server; connections arrive via httpConnCh once Serve is called.
 	apiSrv := api.New(d)
-	httpLn := api.NewChanListener(d.HTTPConnCh(), ln.Addr())
+	httpLn := api.NewChanListener(d.HTTPConnCh(), &net.TCPAddr{IP: net.IPv4zero, Port: port})
 	apiSrv.Start(httpLn)
-
-	// Mux: dispatch P2P vs HTTP from the single TCP listener.
-	go transport.Serve(ln, d.HandleP2P, d.HandleHTTP)
 
 	if err := d.Start(); err != nil {
 		return err
 	}
 	log.Printf("[daemon] started — port=%d socket=%s device=%s", port, socketPath, cfg.DeviceName)
 
+	// --serve opens the shared TCP listener (P2P + HTTP mux).
 	if doServe {
 		d.Serve(port)
 	}
@@ -80,7 +70,6 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	<-sigCh
 
 	log.Println("[daemon] shutting down...")
-	_ = ln.Close()
 	apiSrv.Stop()
 	d.Stop()
 	return nil

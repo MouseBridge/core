@@ -35,7 +35,8 @@ func dispatch(raw net.Conn, connHandler ConnHandler, httpHandler HTTPHandler) {
 		return
 	}
 	if line == P2PHandshakeLine {
-		connHandler(NewConn(multi))
+		// Handshake line already consumed by peek; pass the underlying conn directly.
+		connHandler(NewConn(raw))
 	} else {
 		httpHandler(multi)
 	}
