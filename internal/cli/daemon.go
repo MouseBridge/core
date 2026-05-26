@@ -37,6 +37,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		cfg = config.Default()
 	}
 	if port == 0 {
+		port = envPort()
+	}
+	if port == 0 {
 		port = cfg.Port
 	}
 

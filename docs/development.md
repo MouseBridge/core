@@ -2,44 +2,44 @@
 
 ## 本地双进程测试
 
-在同一台机器上用两个不同端口模拟两台设备互联。
+在同一台机器上用两个不同端口模拟两台设备互联。通过 `MB_PORT` 环境变量指定端口，无需每条命令都加 `-p`。
 
 ```bash
 # 终端 1 — 进程 A（从机），端口 39172
-mousebridge daemon --serve -p 39172
+MB_PORT=39172 mousebridge daemon --serve
 
 # 终端 2 — 进程 B（主机），端口 39174
-mousebridge daemon -p 39174
+MB_PORT=39174 mousebridge daemon
 
 # 终端 3 — 等两个 daemon 都打印 "socket:" 后再执行
 
 # B 连接 A
-mousebridge connect 127.0.0.1 -p 39174 --target-port 39172
+MB_PORT=39174 mousebridge connect 127.0.0.1 --target-port 39172
 
 # A 日志显示 pair_request 和 PIN
 # 在 A 上接受
-mousebridge pair accept -p 39172
+MB_PORT=39172 mousebridge pair accept
 
 # 在 B 上提交 A 显示的 PIN
-mousebridge pair pin <PIN> -p 39174
+MB_PORT=39174 mousebridge pair pin <PIN>
 
 # 查看两侧状态
-mousebridge status -p 39172
-mousebridge status -p 39174
+MB_PORT=39172 mousebridge status
+MB_PORT=39174 mousebridge status
 ```
 
 ### 信任设备（免 PIN 重连）
 
 ```bash
 # 配对成功后，在 A 上信任 B（device-id 从 status 获取）
-mousebridge trust add <B-device-id> --name "MacBook-B" -p 39172
+MB_PORT=39172 mousebridge trust add <B-device-id> --name "MacBook-B"
 
 # 断开后重连，A 自动接受，无需 PIN
-mousebridge disconnect <B-device-id> -p 39174
-mousebridge connect 127.0.0.1 -p 39174 --target-port 39172
+MB_PORT=39174 mousebridge disconnect <B-device-id>
+MB_PORT=39174 mousebridge connect 127.0.0.1 --target-port 39172
 
 # 撤销信任
-mousebridge trust remove <B-device-id> -p 39172
+MB_PORT=39172 mousebridge trust remove <B-device-id>
 ```
 
 ### HTTP API 验证

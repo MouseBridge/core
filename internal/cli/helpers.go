@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	log "github.com/sirupsen/logrus"
 
@@ -11,6 +12,16 @@ import (
 	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/daemon"
 )
+
+// envPort returns the port from MB_PORT env var, or 0 if unset/invalid.
+func envPort() int {
+	if s := os.Getenv("MB_PORT"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			return v
+		}
+	}
+	return 0
+}
 
 // socketFlag returns the Unix socket path for this daemon instance.
 // --socket takes precedence; otherwise ~/.mousebridge/mb-<port>.sock
@@ -35,6 +46,9 @@ func socketFlag(cmd *cobra.Command) string {
 				break
 			}
 		}
+	}
+	if port == 0 {
+		port = envPort()
 	}
 	if port == 0 {
 		cfg, _ := loadConfig()
