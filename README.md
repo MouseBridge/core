@@ -32,7 +32,9 @@ mousebridge daemon              ← 守护进程（前台阻塞，Ctrl+C 退出�
     │   mousebridge serve / connect / disconnect / status / pair
     │   （发完命令立即退出）
     │
-    └── TCP :<port>
+    └── TCP :<port>  ← P2P 设备互联 + HTTP API 共用同一端口
+            │  首行 "MOUSEBRIDGE/1.0\n" → P2P JSON Lines 协议
+            │  其他（HTTP 请求）        → 浏览器 UI（REST + SSE）
             ↕
     对端 mousebridge daemon（另一台机器）
 ```
@@ -94,11 +96,11 @@ mousebridge status                 # 查看当前连接
 ### 本地双进程测试
 
 ```bash
-# 终端 1 — 进程 A（从机），TCP 39172，HTTP API 39176
-mousebridge daemon --serve -p 39172 --http-port 39176
+# 终端 1 — 进程 A（从机），端口 39172（P2P + HTTP API 共用）
+mousebridge daemon --serve -p 39172
 
-# 终端 2 — 进程 B（主机），TCP 39174，HTTP API 39177
-mousebridge daemon -p 39174 --http-port 39177
+# 终端 2 — 进程 B（主机），端口 39174（P2P + HTTP API 共用）
+mousebridge daemon -p 39174
 
 # 终端 3 — 等两个 daemon 都打印 socket: 后再执行
 
@@ -148,13 +150,12 @@ mousebridge trust remove <B-device-id> -p 39172
 启动守护进程，前台阻塞。Ctrl+C 触发优雅关闭：停止监听、断开所有连接、删除 socket 文件。
 
 ```bash
-mousebridge daemon [-p <port>] [--http-port <port>] [--serve] [--connect <ip> ...]
+mousebridge daemon [-p <port>] [--serve] [--connect <ip> ...]
 ```
 
 | 标志 | 说明 | 默认值 |
 |------|------|--------|
-| `-p`, `--port` | TCP 端口（P2P 设备互联），同时决定 socket 路径 | 39172 |
-| `--http-port` | HTTP API 端口（浏览器 UI） | 39173 |
+| `-p`, `--port` | TCP 端口（P2P 设备互联 + HTTP API），同时决定 socket 路径 | 39172 |
 | `--serve` | 启动后立即开始监听 | — |
 | `--connect <ip>` | 启动后立即连接，可重复多次 | — |
 
