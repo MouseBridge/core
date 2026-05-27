@@ -64,27 +64,18 @@ func RunHostSession(c *transport.Conn, localID, localName string, h Host, emit f
 		emit(Event{Kind: "error", Msg: err.Error()})
 		return
 	}
-	pinMsg, err := c.Recv()
-	if err != nil || pinMsg.Type != event.TypePairPin {
-		emit(Event{Kind: "error", Msg: "expected pair_pin"})
+	// First response after PairRequest: either PairAccept (trusted) or PairPin (needs pairing).
+	firstMsg, err := c.Recv()
+	if err != nil {
+		emit(Event{Kind: "error", Msg: "pairing connection lost"})
 		return
 	}
-	var pinPay event.PairPinPayload
-	_ = event.DecodePayload(pinMsg, &pinPay)
 
-	if pinPay.PIN == "" {
-		// Slave auto-accepted (trusted device) — just wait for PairAccept.
-		pairResult, err := c.Recv()
-		if err != nil {
-			emit(Event{Kind: "error", Msg: "pairing connection lost"})
-			return
-		}
-		if pairResult.Type != event.TypePairAccept {
-			emit(Event{Kind: "error", Msg: "expected pair_accept from trusted device, got: " + pairResult.Type})
-			return
-		}
-		emit(Event{Kind: "paired", DeviceID: remoteID, Name: remoteName})
-	} else {
+	if firstMsg.Type == event.TypePairAccept {
+		// Trusted device — slave skipped PIN exchange entirely.
+		emit(Event{Kind: "connected", DeviceID: remoteID, Name: remoteName, IP: c.RemoteAddr().String()})
+		log.Printf("[p2p] trusted device %s auto-connected", remoteName)
+	} else if firstMsg.Type == event.TypePairPin {
 		emit(Event{Kind: "pair_request", DeviceID: remoteID, Name: remoteName, Role: "host"})
 		log.Printf("[p2p] pairing with %s — enter PIN shown on remote device", remoteName)
 
@@ -105,6 +96,9 @@ func RunHostSession(c *transport.Conn, localID, localName string, h Host, emit f
 			return
 		}
 		emit(Event{Kind: "paired", DeviceID: remoteID, Name: remoteName})
+	} else {
+		emit(Event{Kind: "error", Msg: "unexpected message during pairing: " + firstMsg.Type})
+		return
 	}
 	h.SessionAdd(remoteID, remoteName, c.RemoteAddr().String(), "host")
 	emit(Event{Kind: "connected", DeviceID: remoteID, Name: remoteName, IP: c.RemoteAddr().String()})

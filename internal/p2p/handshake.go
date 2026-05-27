@@ -69,10 +69,10 @@ func HandleInbound(c *transport.Conn, h InboundHost, sessionHost Host, emit func
 	}
 
 	if h.IsTrusted(prPay.DeviceID) {
-		_ = c.Send(event.Message{V: 1, Seq: 2, Type: event.TypePairPin, Ts: nowMs(), Payload: event.PairPinPayload{}})
-		_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
-		emit(Event{Kind: "paired", DeviceID: prPay.DeviceID, Name: prPay.Name})
-		log.Printf("[p2p] trusted device %s auto-accepted", prPay.Name)
+		// Skip pairing entirely — send PairAccept directly, no PIN exchange.
+		_ = c.Send(event.Message{V: 1, Seq: 2, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
+		emit(Event{Kind: "connected", DeviceID: prPay.DeviceID, Name: prPay.Name, IP: c.RemoteAddr().String()})
+		log.Printf("[p2p] trusted device %s auto-connected", prPay.Name)
 		adopted = true
 		go RunSlaveSession(c, prPay.DeviceID, prPay.Name, sessionHost, emit)
 		return
