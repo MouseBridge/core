@@ -69,28 +69,43 @@ func RunHostSession(c *transport.Conn, localID, localName string, h Host, emit f
 		emit(Event{Kind: "error", Msg: "expected pair_pin"})
 		return
 	}
+	var pinPay event.PairPinPayload
+	_ = event.DecodePayload(pinMsg, &pinPay)
 
-	emit(Event{Kind: "pair_request", DeviceID: remoteID, Name: remoteName, Role: "host"})
-	log.Printf("[p2p] pairing with %s — enter PIN shown on remote device", remoteName)
+	if pinPay.PIN == "" {
+		// Slave auto-accepted (trusted device) — just wait for PairAccept.
+		pairResult, err := c.Recv()
+		if err != nil {
+			emit(Event{Kind: "error", Msg: "pairing connection lost"})
+			return
+		}
+		if pairResult.Type != event.TypePairAccept {
+			emit(Event{Kind: "error", Msg: "expected pair_accept from trusted device, got: " + pairResult.Type})
+			return
+		}
+		emit(Event{Kind: "paired", DeviceID: remoteID, Name: remoteName})
+	} else {
+		emit(Event{Kind: "pair_request", DeviceID: remoteID, Name: remoteName, Role: "host"})
+		log.Printf("[p2p] pairing with %s — enter PIN shown on remote device", remoteName)
 
-	h.SetPendingHostConn(c)
-	defer h.ClearPendingHostConn(c)
+		h.SetPendingHostConn(c)
+		defer h.ClearPendingHostConn(c)
 
-	pairResult, err := c.Recv()
-	if err != nil {
-		emit(Event{Kind: "error", Msg: "pairing connection lost"})
-		return
+		pairResult, err := c.Recv()
+		if err != nil {
+			emit(Event{Kind: "error", Msg: "pairing connection lost"})
+			return
+		}
+		if pairResult.Type == event.TypePairReject {
+			emit(Event{Kind: "error", Msg: "pairing rejected by remote"})
+			return
+		}
+		if pairResult.Type != event.TypePairAccept {
+			emit(Event{Kind: "error", Msg: "unexpected pairing message: " + pairResult.Type})
+			return
+		}
+		emit(Event{Kind: "paired", DeviceID: remoteID, Name: remoteName})
 	}
-	if pairResult.Type == event.TypePairReject {
-		emit(Event{Kind: "error", Msg: "pairing rejected by remote"})
-		return
-	}
-	if pairResult.Type != event.TypePairAccept {
-		emit(Event{Kind: "error", Msg: "unexpected pairing message: " + pairResult.Type})
-		return
-	}
-
-	emit(Event{Kind: "paired", DeviceID: remoteID, Name: remoteName})
 	h.SessionAdd(remoteID, remoteName, c.RemoteAddr().String(), "host")
 	emit(Event{Kind: "connected", DeviceID: remoteID, Name: remoteName, IP: c.RemoteAddr().String()})
 	log.Printf("[p2p] connected to %s (%s)", remoteName, c.RemoteAddr())
