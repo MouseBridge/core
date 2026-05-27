@@ -9,10 +9,15 @@ import (
 
 const dialTimeout = 10 * time.Second
 
-// Dial connects to ip:port, writes the P2P handshake line, and returns a Conn.
+// Dial connects to ip:port with the default timeout, writes the P2P handshake line, and returns a Conn.
 func Dial(ip string, port int) (*Conn, error) {
-	addr := net.JoinHostPort(ip, strconv.Itoa(port))
-	raw, err := net.DialTimeout("tcp", addr, dialTimeout)
+	return DialTimeout(ip, port, dialTimeout)
+}
+
+// DialTimeout connects to ip:port with the given timeout, writes the P2P handshake line, and returns a Conn.
+func DialTimeout(host string, port int, timeout time.Duration) (*Conn, error) {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	raw, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("transport: dial %s: %w", addr, err)
 	}

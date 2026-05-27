@@ -10,163 +10,171 @@ import (
 	"github.com/mousebridge/core/internal/transport"
 )
 
-// Host is the subset of daemon.Daemon that p2p sessions need.
-type Host interface {
+// SessionHost is the subset of daemon that active sessions need.
+type SessionHost interface {
 	TrackConn(c *transport.Conn, deviceID string)
 	UntrackConn(c *transport.Conn)
-	SessionAdd(id, name, ip, role string)
-	SessionRemove(id string)
-	SessionRecordLatency(id string, ms float64)
-	SetPendingHostConn(c *transport.Conn)
-	ClearPendingHostConn(c *transport.Conn)
+	SessionAdd(connectionID, deviceID, name, ip, role string)
+	SessionRemove(connectionID string)
+	SessionRecordLatency(connectionID string, ms float64)
 }
 
-// Event carries session lifecycle updates back to the daemon for broadcasting.
-type Event struct {
-	Kind     string // "error","log","paired","pair_request","connected","disconnected"
-	DeviceID string
-	Name     string
-	IP       string
-	PIN      string
-	Role     string
-	Msg      string
-}
-
-// RunHostSession runs the event loop after dialing a remote daemon (host role).
-func RunHostSession(c *transport.Conn, localID, localName string, h Host, emit func(Event)) {
-	h.TrackConn(c, "")
+// RunSession runs the message loop for an authenticated session.
+// role is "server" or "client".
+func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, emit func(BusEvent)) {
+	connID := newConnectionID()
+	h.TrackConn(c, deviceID)
 	defer h.UntrackConn(c)
 	defer c.Close()
 
-	nowMs := func() int64 { return time.Now().UnixMilli() }
+	h.SessionAdd(connID, deviceID, name, c.RemoteAddr().String(), role)
+	emit(BusEvent{Kind: "session_connected", DeviceID: deviceID, Name: name,
+		RemoteIP: c.RemoteAddr().String(), Role: role})
+	log.Printf("[p2p] session active with %s (%s) role=%s", name, deviceID[:12], role)
 
-	if err := c.Send(event.Message{
-		V: 1, Seq: 1, Type: event.TypeHandshake, Ts: nowMs(),
-		Payload: event.HandshakePayload{DeviceID: localID, Name: localName, Platform: "macos"},
-	}); err != nil {
-		emit(Event{Kind: "error", Msg: "handshake: " + err.Error()})
-		return
-	}
-	hsReply, err := c.Recv()
-	if err != nil || hsReply.Type != event.TypeHandshake {
-		emit(Event{Kind: "error", Msg: "handshake reply failed"})
-		return
-	}
-	var hsPay event.HandshakePayload
-	_ = event.DecodePayload(hsReply, &hsPay)
-	remoteID, remoteName := hsPay.DeviceID, hsPay.Name
-	h.TrackConn(c, remoteID)
-
-	if err := c.Send(event.Message{
-		V: 1, Seq: 2, Type: event.TypePairRequest, Ts: nowMs(),
-		Payload: event.PairRequestPayload{DeviceID: localID, Name: localName},
-	}); err != nil {
-		emit(Event{Kind: "error", Msg: err.Error()})
-		return
-	}
-	// First response after PairRequest: either PairAccept (trusted) or PairPin (needs pairing).
-	firstMsg, err := c.Recv()
-	if err != nil {
-		emit(Event{Kind: "error", Msg: "pairing connection lost"})
-		return
-	}
-
-	if firstMsg.Type == event.TypePairAccept {
-		// Trusted device — slave skipped PIN exchange entirely.
-		emit(Event{Kind: "connected", DeviceID: remoteID, Name: remoteName, IP: c.RemoteAddr().String()})
-		log.Printf("[p2p] trusted device %s auto-connected", remoteName)
-	} else if firstMsg.Type == event.TypePairPin {
-		emit(Event{Kind: "pair_request", DeviceID: remoteID, Name: remoteName, Role: "host"})
-		log.Printf("[p2p] pairing with %s — enter PIN shown on remote device", remoteName)
-
-		h.SetPendingHostConn(c)
-		defer h.ClearPendingHostConn(c)
-
-		pairResult, err := c.Recv()
-		if err != nil {
-			emit(Event{Kind: "error", Msg: "pairing connection lost"})
-			return
-		}
-		if pairResult.Type == event.TypePairReject {
-			emit(Event{Kind: "error", Msg: "pairing rejected by remote"})
-			return
-		}
-		if pairResult.Type != event.TypePairAccept {
-			emit(Event{Kind: "error", Msg: "unexpected pairing message: " + pairResult.Type})
-			return
-		}
-		emit(Event{Kind: "paired", DeviceID: remoteID, Name: remoteName})
-	} else {
-		emit(Event{Kind: "error", Msg: "unexpected message during pairing: " + firstMsg.Type})
-		return
-	}
-	h.SessionAdd(remoteID, remoteName, c.RemoteAddr().String(), "host")
-	emit(Event{Kind: "connected", DeviceID: remoteID, Name: remoteName, IP: c.RemoteAddr().String()})
-	log.Printf("[p2p] connected to %s (%s)", remoteName, c.RemoteAddr())
-
+	var seq int64 = 10
 	for {
 		msg, err := c.Recv()
 		if err != nil {
-			emit(Event{Kind: "disconnected", DeviceID: remoteID, Name: remoteName})
-			h.SessionRemove(remoteID)
+			emit(BusEvent{Kind: "session_disconnected", DeviceID: deviceID, Name: name})
+			h.SessionRemove(connID)
 			return
 		}
-		latency := float64(nowMs() - msg.Ts)
-		h.SessionRecordLatency(remoteID, latency)
-		switch msg.Type {
-		case event.TypePong:
-			var pay event.PongPayload
-			_ = event.DecodePayload(msg, &pay)
-			rtt := float64(nowMs() - pay.EchoTs)
-			h.SessionRecordLatency(remoteID, rtt)
-			emit(Event{Kind: "log", Msg: fmt.Sprintf("pong rtt=%.1fms", rtt)})
-		case event.TypeSwitchAck:
-			emit(Event{Kind: "log", Msg: fmt.Sprintf("switch_ack from %s", remoteName)})
-		default:
-			emit(Event{Kind: "log", Msg: fmt.Sprintf("recv %s latency=%.1fms", msg.Type, latency)})
-		}
-	}
-}
+		latency := float64(time.Now().UnixMilli() - msg.Ts)
+		h.SessionRecordLatency(connID, latency)
 
-// RunSlaveSession runs the event loop after pairing on the slave side.
-func RunSlaveSession(c *transport.Conn, peerID, peerName string, h Host, emit func(Event)) {
-	h.TrackConn(c, peerID)
-	defer h.UntrackConn(c)
-	defer c.Close()
-
-	nowMs := func() int64 { return time.Now().UnixMilli() }
-
-	h.SessionAdd(peerID, peerName, c.RemoteAddr().String(), "slave")
-	emit(Event{Kind: "connected", DeviceID: peerID, Name: peerName, IP: c.RemoteAddr().String()})
-	log.Printf("[p2p] slave session started with %s (id=%s)", peerName, peerID)
-
-	var seq int64 = 4
-	for {
-		msg, err := c.Recv()
-		if err != nil {
-			emit(Event{Kind: "disconnected", DeviceID: peerID, Name: peerName})
-			h.SessionRemove(peerID)
-			return
-		}
-		latency := float64(nowMs() - msg.Ts)
-		h.SessionRecordLatency(peerID, latency)
 		switch msg.Type {
 		case event.TypePing:
 			_ = c.Send(event.Message{
-				V: 1, Seq: seq, Type: event.TypePong, Ts: nowMs(),
+				V: 1, Seq: seq, Type: event.TypePong, Ts: time.Now().UnixMilli(),
 				Payload: event.PongPayload{EchoTs: msg.Ts},
 			})
-			emit(Event{Kind: "log", Msg: fmt.Sprintf("recv ping latency=%.1fms", latency)})
 			seq++
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("ping latency=%.1fms", latency)})
+
+		case event.TypePong:
+			var pay event.PongPayload
+			_ = event.DecodePayload(msg, &pay)
+			rtt := float64(time.Now().UnixMilli() - pay.EchoTs)
+			h.SessionRecordLatency(connID, rtt)
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("pong rtt=%.1fms", rtt)})
+
 		case event.TypeSwitchRequest:
 			var pay event.SwitchRequestPayload
 			_ = event.DecodePayload(msg, &pay)
-			emit(Event{Kind: "log", Msg: fmt.Sprintf("recv switch_request trigger=%s entry=%s@%.0f%% latency=%.1fms",
-				pay.Trigger, pay.Edge, pay.EntryPct*100, latency)})
-			_ = c.Send(event.Message{V: 1, Seq: seq, Type: event.TypeSwitchAck, Ts: nowMs(), Payload: struct{}{}})
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_request trigger=%s edge=%s latency=%.1fms",
+				pay.Trigger, pay.Edge, latency)})
+			_ = c.Send(event.Message{V: 1, Seq: seq, Type: event.TypeSwitchAck, Ts: time.Now().UnixMilli(), Payload: struct{}{}})
 			seq++
+
+		case event.TypeSwitchAck:
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_ack from %s latency=%.1fms", name, latency)})
+
 		default:
-			emit(Event{Kind: "log", Msg: fmt.Sprintf("recv %s latency=%.1fms", msg.Type, latency)})
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv %s latency=%.1fms", msg.Type, latency)})
+		}
+	}
+}
+
+// DialAndPair dials a remote daemon, exchanges hellos, completes PIN pairing as the
+// client side, and starts a session on success.
+//
+// tracker is used to register the outbound pairing so the daemon can forward the
+// PIN from POST /api/pair/pin. The connection is stored in the tracker entry so
+// the daemon can call conn.Send(pair_confirm).
+func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
+	h SessionHost, tracker *OutboundTracker, emit func(BusEvent)) {
+
+	connID := newConnectionID()
+	adopted := false
+	defer func() {
+		if !adopted {
+			c.Close()
+		}
+	}()
+
+	// Send hello first as client.
+	if err := sendHello(c, localID, localDisplayID, localName); err != nil {
+		emit(BusEvent{Kind: "error", Msg: "send hello: " + err.Error()})
+		return
+	}
+	serverHello, err := recvHello(c)
+	if err != nil {
+		emit(BusEvent{Kind: "error", Msg: "recv hello: " + err.Error()})
+		return
+	}
+
+	serverID := serverHello.DeviceID
+	serverName := serverHello.Name
+
+	if serverID == localID {
+		emit(BusEvent{Kind: "error", Msg: "remote device_id equals local; self-connection rejected"})
+		return
+	}
+
+	// Wait for pair_challenge from server.
+	msg, err := c.Recv()
+	if err != nil {
+		emit(BusEvent{Kind: "error", Msg: "connection lost waiting for pair_challenge"})
+		return
+	}
+	if msg.Type == event.TypePairAccept {
+		// Remembered auto-connect.
+		emit(BusEvent{Kind: "session_connected", DeviceID: serverID, Name: serverName,
+			RemoteIP: c.RemoteAddr().String(), Role: "client"})
+		adopted = true
+		go RunSession(c, serverID, serverName, "client", h, emit)
+		return
+	}
+	if msg.Type != event.TypePairChallenge {
+		emit(BusEvent{Kind: "error", Msg: "unexpected message: " + msg.Type})
+		return
+	}
+	var challenge event.PairChallengePayload
+	_ = event.DecodePayload(msg, &challenge)
+	pairingID := challenge.PairingID
+
+	emit(BusEvent{
+		Kind: "pair_request", PairingID: pairingID, ConnectionID: connID,
+		ClaimedDeviceID: serverID, DisplayID: serverID[:12], Name: serverName,
+		RemoteIP: c.RemoteAddr().String(), Role: "client",
+	})
+	log.Printf("[p2p] pairing with %s — enter PIN shown on remote device", serverName)
+
+	// Register in tracker so daemon can forward PIN via POST /api/pair/pin.
+	if tracker != nil {
+		tracker.Add(&OutboundPairing{
+			PairingID:       pairingID,
+			ConnectionID:    connID,
+			RemoteName:      serverName,
+			RemoteDisplayID: serverID[:12],
+			ExpiresAt:       time.Now().Add(2 * time.Minute),
+			Conn:            c,
+		})
+		defer tracker.Remove(pairingID)
+	}
+
+	for {
+		reply, err := c.Recv()
+		if err != nil {
+			emit(BusEvent{Kind: "error", Msg: "connection lost during PIN exchange"})
+			return
+		}
+		switch reply.Type {
+		case event.TypePairAccept:
+			emit(BusEvent{Kind: "paired", PairingID: pairingID, ConnectionID: connID,
+				DeviceID: serverID, Name: serverName})
+			log.Printf("[p2p] paired with server %s (%s)", serverName, serverID[:12])
+			adopted = true
+			go RunSession(c, serverID, serverName, "client", h, emit)
+			return
+		case event.TypePairReject:
+			emit(BusEvent{Kind: "pair_reject", PairingID: pairingID, Msg: "rejected by server"})
+			return
+		case event.TypePairRetry:
+			var pay event.PairRetryPayload
+			_ = event.DecodePayload(reply, &pay)
+			emit(BusEvent{Kind: "pair_retry", PairingID: pairingID, AttemptsRemaining: pay.AttemptsRemaining})
 		}
 	}
 }

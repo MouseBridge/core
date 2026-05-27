@@ -6,11 +6,14 @@ import (
 )
 
 func TestSubscribeReceivesEvents(t *testing.T) {
-	d := New(Options{SocketPath: "/tmp/mb-sub-test.sock", TCPPort: 0})
+	d, err := New(Options{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ch := d.Subscribe()
 	defer d.Unsubscribe(ch)
 
-	d.broadcast(Event{Event: "log", Msg: "hello"})
+	d.broadcast(BusEvent{Kind: "log", Msg: "hello"})
 
 	select {
 	case ev := <-ch:
@@ -22,24 +25,17 @@ func TestSubscribeReceivesEvents(t *testing.T) {
 	}
 }
 
-func TestHandleCommandServe(t *testing.T) {
-	d := New(Options{SocketPath: "/tmp/mb-hcmd-test.sock", TCPPort: 39299})
+func TestStartListens(t *testing.T) {
+	d, err := New(Options{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer d.Stop()
 
-	ch := d.Subscribe()
-	defer d.Unsubscribe(ch)
-
-	d.HandleCommand(Command{Cmd: "serve", Port: 39299})
-
-	select {
-	case ev := <-ch:
-		if ev.Event != "listening" && ev.Event != "error" {
-			t.Fatalf("unexpected event %q", ev.Event)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out")
+	if d.Addr() == "" {
+		t.Fatal("expected non-empty addr after Start")
 	}
 }

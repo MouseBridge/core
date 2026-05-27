@@ -12,20 +12,36 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Port != 39172 {
 		t.Fatalf("default port: want 39172 got %d", cfg.Port)
 	}
-	if cfg.Hotkeys.SwitchNext != "ctrl+alt+right" {
-		t.Fatalf("default SwitchNext: %q", cfg.Hotkeys.SwitchNext)
+	if cfg.ListenHost != "127.0.0.1" {
+		t.Fatalf("default listen_host: want 127.0.0.1 got %q", cfg.ListenHost)
 	}
-	if cfg.Hotkeys.SwitchPrev != "ctrl+alt+left" {
-		t.Fatalf("default SwitchPrev: %q", cfg.Hotkeys.SwitchPrev)
+	if cfg.PairingPINTTLSeconds != 120 {
+		t.Fatalf("default pin ttl: want 120 got %d", cfg.PairingPINTTLSeconds)
 	}
-	if cfg.Hotkeys.SwitchToHost != "ctrl+alt+home" {
-		t.Fatalf("default SwitchToHost: %q", cfg.Hotkeys.SwitchToHost)
+}
+
+func TestValidateLoopback(t *testing.T) {
+	cfg := config.Default()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("loopback default should be valid: %v", err)
 	}
-	if cfg.Hotkeys.DisconnectAll != "" {
-		t.Fatalf("default DisconnectAll should be empty, got %q", cfg.Hotkeys.DisconnectAll)
+}
+
+func TestValidateLANWithoutUnsafe(t *testing.T) {
+	cfg := config.Default()
+	cfg.ListenHost = "0.0.0.0"
+	cfg.UnsafeHTTPLAN = false
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error when LAN host without unsafe flag")
 	}
-	if cfg.Hotkeys.TogglePause != "" {
-		t.Fatalf("default TogglePause should be empty, got %q", cfg.Hotkeys.TogglePause)
+}
+
+func TestValidateLANWithUnsafe(t *testing.T) {
+	cfg := config.Default()
+	cfg.ListenHost = "0.0.0.0"
+	cfg.UnsafeHTTPLAN = true
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("LAN with unsafe flag should be valid: %v", err)
 	}
 }
 

@@ -14,7 +14,7 @@ type HTTPHandler func(c net.Conn)
 
 // Serve accepts connections from ln and dispatches each one:
 // P2P connections (starting with P2PHandshakeLine) go to connHandler,
-// everything else goes to httpHandler.
+// HTTP connections go to httpHandler.
 // Blocks until ln is closed.
 func Serve(ln net.Listener, connHandler ConnHandler, httpHandler HTTPHandler) {
 	for {
@@ -35,9 +35,13 @@ func dispatch(raw net.Conn, connHandler ConnHandler, httpHandler HTTPHandler) {
 		return
 	}
 	if line == P2PHandshakeLine {
-		// Handshake line already consumed by peek; pass the underlying conn directly.
+		// P2P: handshake line already consumed by peek; wrap the underlying conn.
 		connHandler(NewConn(raw))
-	} else {
+	} else if isHTTPPrefix([]byte(line)) {
+		// HTTP: feed the full connection (with peeked bytes prepended) to HTTP server.
 		httpHandler(multi)
+	} else {
+		log.Printf("transport: unknown protocol from %s (line=%q), closing", raw.RemoteAddr(), line)
+		_ = multi.Close()
 	}
 }

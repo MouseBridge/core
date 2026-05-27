@@ -1,66 +1,40 @@
 package daemon_test
 
 import (
-	"bufio"
-	"encoding/json"
-	"net"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/mousebridge/core/internal/daemon"
 )
 
 func TestDaemonStartStop(t *testing.T) {
-	sockPath := filepath.Join(t.TempDir(), "mb.sock")
-	d := daemon.New(daemon.Options{
-		SocketPath: sockPath,
-		TCPPort:    0,
-	})
+	d, err := daemon.New(daemon.Options{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	if err := d.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer d.Stop()
-
-	if _, err := os.Stat(sockPath); err != nil {
-		t.Fatalf("socket not created: %v", err)
+	addr := d.Addr()
+	if addr == "" {
+		t.Fatal("expected non-empty listen addr after Start")
+	}
+	d.Stop()
+	if d.Addr() != "" {
+		t.Fatal("expected empty addr after Stop")
 	}
 }
 
-func TestDaemonBroadcastsStatusEvent(t *testing.T) {
-	sockPath := filepath.Join(t.TempDir(), "mb.sock")
-	d := daemon.New(daemon.Options{
-		SocketPath: sockPath,
-		TCPPort:    0,
-	})
-	if err := d.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer d.Stop()
-
-	conn, err := net.Dial("unix", sockPath)
+func TestDaemonSubscribeBroadcast(t *testing.T) {
+	d, err := daemon.New(daemon.Options{DataDir: t.TempDir()})
 	if err != nil {
-		t.Fatalf("dial: %v", err)
+		t.Fatalf("New: %v", err)
 	}
-	defer conn.Close()
+	ch := d.Subscribe()
+	defer d.Unsubscribe(ch)
 
-	cmd := daemon.Command{Cmd: "status"}
-	data, _ := json.Marshal(cmd)
-	if _, err := conn.Write(append(data, '\n')); err != nil {
-		t.Fatalf("write cmd: %v", err)
-	}
-
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	scanner := bufio.NewScanner(conn)
-	if !scanner.Scan() {
-		t.Fatalf("no event received: %v", scanner.Err())
-	}
-	var ev daemon.Event
-	if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
-		t.Fatalf("decode event: %v", err)
-	}
-	if ev.Event != "status" {
-		t.Fatalf("want status event got %q", ev.Event)
+	// State() should not panic.
+	snap := d.State()
+	if snap.Daemon.DeviceID == "" {
+		t.Fatal("expected non-empty device_id")
 	}
 }

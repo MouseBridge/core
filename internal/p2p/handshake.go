@@ -6,151 +6,213 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/mousebridge/core/internal/event"
-	"github.com/mousebridge/core/internal/pairing"
+	"github.com/mousebridge/core/internal/pending"
+	"github.com/mousebridge/core/internal/remembered"
 	"github.com/mousebridge/core/internal/transport"
+	"github.com/mousebridge/core/internal/validate"
 )
 
-// InboundHost is the subset of daemon.Daemon needed for the inbound handshake.
-type InboundHost interface {
+// ServerHost is the subset of daemon that the inbound handshake needs.
+type ServerHost interface {
 	LocalID() string
 	LocalName() string
-	IsTrusted(deviceID string) bool
-	AddPendingSlave(deviceID string, entry *PendingSlaveEntry)
-	RemovePendingSlave(deviceID string)
+	LocalDisplayID() string
+	PendingManager() *pending.Manager
+	RememberedStore() *remembered.Store
+	RememberedEnabled() bool
 }
 
-// PendingSlaveEntry holds state for a slave-side pairing waiting on user accept/reject.
-type PendingSlaveEntry struct {
-	Mgr  *pairing.Manager
-	Conn *transport.Conn
-	Name string
+// BusEvent carries session lifecycle updates to the daemon for broadcasting.
+type BusEvent struct {
+	Kind string // "error","log","pair_request","pair_retry","pair_reject","pair_timeout","paired","session_connected","session_disconnected"
+
+	PairingID         string
+	ConnectionID      string
+	ClaimedDeviceID   string
+	DisplayID         string
+	Name              string
+	RemoteIP          string
+	AttemptsRemaining int
+	Remembered        bool
+
+	DeviceID string // authenticated device_id (post-auth events)
+	Role     string // "server"|"client"
+	DisplayPIN string
+
+	Msg string
 }
 
 // HandleInbound drives the inbound pairing flow for one new P2P connection.
-// On success, calls RunSlaveSession in a new goroutine.
-func HandleInbound(c *transport.Conn, h InboundHost, sessionHost Host, emit func(Event)) {
-	nowMs := func() int64 { return time.Now().UnixMilli() }
-	var peerDeviceID string
+// On success, calls RunSession in a new goroutine.
+func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost SessionHost, emit func(BusEvent)) {
+	connID := newConnectionID()
 	adopted := false
+	var pairingID string
 
 	defer func() {
-		if peerDeviceID != "" {
-			h.RemovePendingSlave(peerDeviceID)
-		}
 		if !adopted {
 			c.Close()
 		}
 	}()
 
-	remote := c.RemoteAddr().String()
-	hs, err := c.Recv()
+	remoteAddr := c.RemoteAddr().String()
+
+	// Exchange hellos.
+	if err := sendHello(c, localID, h.LocalDisplayID(), h.LocalName()); err != nil {
+		log.Printf("[p2p] send hello to %s: %v", remoteAddr, err)
+		return
+	}
+	peerHello, err := recvHello(c)
 	if err != nil {
-		log.Printf("[p2p] handshake from %s: %v", remote, err)
+		log.Printf("[p2p] recv hello from %s: %v", remoteAddr, err)
 		return
-	}
-	var hsPay event.HandshakePayload
-	if err := event.DecodePayload(hs, &hsPay); err != nil || hs.Type != event.TypeHandshake {
-		return
-	}
-	_ = c.Send(event.Message{
-		V: 1, Seq: 1, Type: event.TypeHandshake, Ts: nowMs(),
-		Payload: event.HandshakePayload{DeviceID: h.LocalID(), Name: h.LocalName(), Platform: "macos"},
-	})
-
-	pairMsg, err := c.Recv()
-	if err != nil || pairMsg.Type != event.TypePairRequest {
-		return
-	}
-	var prPay event.PairRequestPayload
-	_ = event.DecodePayload(pairMsg, &prPay)
-	// Prefer handshake name; PairRequest name is a redundant fallback.
-	if prPay.Name == "" {
-		prPay.Name = hsPay.Name
 	}
 
-	if h.IsTrusted(prPay.DeviceID) {
-		// Skip pairing entirely — send PairAccept directly, no PIN exchange.
-		_ = c.Send(event.Message{V: 1, Seq: 2, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
-		emit(Event{Kind: "connected", DeviceID: prPay.DeviceID, Name: prPay.Name, IP: c.RemoteAddr().String()})
-		log.Printf("[p2p] trusted device %s auto-connected", prPay.Name)
+	// Validate claimed device_id from remote.
+	claimedID := peerHello.DeviceID
+	if err := validate.DeviceID(claimedID); err != nil {
+		log.Printf("[p2p] invalid claimed device_id from %s: %v", remoteAddr, err)
+		return
+	}
+	if claimedID == localID {
+		log.Printf("[p2p] remote device_id equals local; rejecting self-connection from %s", remoteAddr)
+		return
+	}
+	if err := validate.SafeString(peerHello.Name); err != nil {
+		log.Printf("[p2p] invalid name from %s: %v", remoteAddr, err)
+		return
+	}
+	peerName := peerHello.Name
+	peerDisplayID := claimedID[:12]
+
+	// Check remembered.
+	rem := h.RememberedStore()
+	if rec, ok := rem.Get(claimedID); ok {
+		// Trusted remembered device: accept immediately (no PIN).
+		_ = c.Send(event.Message{
+			V: 1, Seq: nextSeq(), Type: event.TypePairAccept, Ts: nowMs(),
+			Payload: event.PairAcceptPayload{Remembered: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret},
+		})
+		_ = rem.UpdateLastSeen(claimedID, time.Now())
+		emit(BusEvent{Kind: "session_connected", DeviceID: claimedID, DisplayID: peerDisplayID, Name: peerName, RemoteIP: remoteAddr, Role: "server"})
+		log.Printf("[p2p] remembered device %s (%s) auto-connected", peerName, claimedID[:12])
 		adopted = true
-		go RunSlaveSession(c, prPay.DeviceID, prPay.Name, sessionHost, emit)
+		go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
 		return
 	}
 
-	mgr := pairing.NewManager()
-	pin, err := mgr.StartAsSlave(prPay.DeviceID, prPay.Name)
+	// New device: start PIN pairing.
+	pm := h.PendingManager()
+	entry, err := pm.Add(connID, claimedID, peerDisplayID, peerName, remoteAddr)
 	if err != nil {
+		log.Printf("[p2p] pending add: %v", err)
 		return
 	}
+	pairingID = entry.PairingID
+	pin := pm.PIN(pairingID)
 
-	peerDeviceID = prPay.DeviceID
-	entry := &PendingSlaveEntry{Mgr: mgr, Conn: c, Name: prPay.Name}
-	h.AddPendingSlave(peerDeviceID, entry)
-
+	// Send pair_challenge to client.
 	_ = c.Send(event.Message{
-		V: 1, Seq: 2, Type: event.TypePairPin, Ts: nowMs(),
-		Payload: event.PairPinPayload{},
+		V: 1, Seq: nextSeq(), Type: event.TypePairChallenge, Ts: nowMs(),
+		Payload: event.PairChallengePayload{PairingID: pairingID, ServerName: h.LocalName()},
 	})
-	emit(Event{Kind: "pair_request", DeviceID: prPay.DeviceID, Name: prPay.Name, PIN: pin, Role: "slave"})
-	log.Printf("[p2p] pair_request from %s (id=%s) — PIN: %s", prPay.Name, prPay.DeviceID, pin)
 
-	confirmCh := make(chan string, 1)
-	go func() {
-		for {
-			msg, err := c.Recv()
-			if err != nil {
-				return
-			}
-			if msg.Type == event.TypePairConfirm {
-				var pay event.PairConfirmPayload
-				_ = event.DecodePayload(msg, &pay)
-				confirmCh <- pay.PIN
-				return
-			}
-		}
-	}()
+	emit(BusEvent{
+		Kind: "pair_request", PairingID: pairingID, ConnectionID: connID,
+		ClaimedDeviceID: claimedID, DisplayID: peerDisplayID, Name: peerName,
+		RemoteIP: remoteAddr, AttemptsRemaining: entry.MaxAttempts,
+		DisplayPIN: pin, Role: "server",
+	})
+	log.Printf("[p2p] pair_request from %s (%s) — PIN: %s", peerName, claimedID[:12], pin)
 
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	timeout := time.After(60 * time.Second)
+	// Wait for pair_confirm messages.
 	for {
-		select {
-		case <-timeout:
-			emit(Event{Kind: "error", Msg: "pairing timed out"})
-			_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{}})
-			h.RemovePendingSlave(peerDeviceID)
-			peerDeviceID = ""
+		msg, err := c.Recv()
+		if err != nil {
+			pm.Reject(pairingID)
+			emit(BusEvent{Kind: "error", PairingID: pairingID, Msg: "connection lost during pairing"})
 			return
-		case pin := <-confirmCh:
-			if err := mgr.ConfirmPIN(pin); err != nil {
-				_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairReject, Ts: nowMs(), Payload: struct{}{}})
-				emit(Event{Kind: "error", Msg: "wrong PIN"})
-				h.RemovePendingSlave(peerDeviceID)
-				peerDeviceID = ""
-				return
+		}
+
+		if msg.Type != event.TypePairConfirm {
+			continue
+		}
+		var pay event.PairConfirmPayload
+		_ = event.DecodePayload(msg, &pay)
+
+		result, e := pm.Verify(pairingID, pay.PIN)
+		switch result {
+		case pending.VerifyOK:
+			// Pairing success.
+			var accepted event.PairAcceptPayload
+			if h.RememberedEnabled() {
+				rec, saveErr := buildAndSaveRemembered(claimedID, peerDisplayID, peerName, rem)
+				if saveErr == nil {
+					accepted = event.PairAcceptPayload{Remembered: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret}
+				} else {
+					log.Printf("[p2p] remembered save failed: %v", saveErr)
+					accepted = event.PairAcceptPayload{Remembered: false}
+				}
 			}
-			_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
-			emit(Event{Kind: "paired", DeviceID: prPay.DeviceID, Name: prPay.Name})
-			h.RemovePendingSlave(peerDeviceID)
-			peerDeviceID = ""
+			_ = c.Send(event.Message{
+				V: 1, Seq: nextSeq(), Type: event.TypePairAccept, Ts: nowMs(),
+				Payload: accepted,
+			})
+			emit(BusEvent{Kind: "paired", PairingID: pairingID, ConnectionID: connID,
+				DeviceID: claimedID, Name: peerName, Remembered: accepted.Remembered})
+			log.Printf("[p2p] paired with %s (%s)", peerName, claimedID[:12])
 			adopted = true
-			go RunSlaveSession(c, prPay.DeviceID, prPay.Name, sessionHost, emit)
+			go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
 			return
-		case <-ticker.C:
-			state := mgr.State()
-			if state == pairing.StatePaired {
-				_ = c.Send(event.Message{V: 1, Seq: 3, Type: event.TypePairAccept, Ts: nowMs(), Payload: struct{}{}})
-				emit(Event{Kind: "paired", DeviceID: prPay.DeviceID, Name: prPay.Name})
-				h.RemovePendingSlave(peerDeviceID)
-				peerDeviceID = ""
-				adopted = true
-				go RunSlaveSession(c, prPay.DeviceID, prPay.Name, sessionHost, emit)
-				return
-			}
-			if state == pairing.StateRejected {
-				return
-			}
+
+		case pending.VerifyRetry:
+			remaining := e.AttemptsRemaining()
+			_ = c.Send(event.Message{
+				V: 1, Seq: nextSeq(), Type: event.TypePairRetry, Ts: nowMs(),
+				Payload: event.PairRetryPayload{PairingID: pairingID, AttemptsRemaining: remaining},
+			})
+			emit(BusEvent{Kind: "pair_retry", PairingID: pairingID, AttemptsRemaining: remaining})
+
+		case pending.VerifyReject:
+			_ = c.Send(event.Message{
+				V: 1, Seq: nextSeq(), Type: event.TypePairReject, Ts: nowMs(),
+				Payload: event.PairRejectPayload{Reason: "invalid_pin"},
+			})
+			emit(BusEvent{Kind: "pair_reject", PairingID: pairingID, Msg: "invalid_pin"})
+			return
+
+		case pending.VerifyExpired:
+			_ = c.Send(event.Message{
+				V: 1, Seq: nextSeq(), Type: event.TypePairReject, Ts: nowMs(),
+				Payload: event.PairRejectPayload{Reason: "expired"},
+			})
+			emit(BusEvent{Kind: "pair_timeout", PairingID: pairingID})
+			return
 		}
 	}
 }
+
+func buildAndSaveRemembered(deviceID, displayID, name string, rem *remembered.Store) (remembered.Record, error) {
+	secretID, err := randomHex16()
+	if err != nil {
+		return remembered.Record{}, err
+	}
+	pairSecret, err := randomHex32()
+	if err != nil {
+		return remembered.Record{}, err
+	}
+	now := time.Now()
+	rec := remembered.Record{
+		DeviceID:   deviceID,
+		DisplayID:  displayID,
+		Name:       name,
+		SecretID:   secretID,
+		PairSecret: pairSecret,
+		CreatedAt:  now,
+		LastSeenAt: now,
+	}
+	return rec, rem.Add(rec)
+}
+
+func randomHex16() (string, error) { return randomHex(8) }
+func randomHex32() (string, error) { return randomHex(16) }

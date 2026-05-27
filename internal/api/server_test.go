@@ -16,10 +16,10 @@ import (
 
 func newTestServer(t *testing.T) (*api.Server, string) {
 	t.Helper()
-	d := daemon.New(daemon.Options{
-		SocketPath: t.TempDir() + "/mb.sock",
-		TCPPort:    0,
-	})
+	d, err := daemon.New(daemon.Options{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -48,11 +48,11 @@ func TestStatus(t *testing.T) {
 	}
 	var result map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&result)
-	if _, ok := result["devices"]; !ok {
-		t.Fatal("missing 'devices'")
+	if _, ok := result["daemon"]; !ok {
+		t.Fatal("missing 'daemon' field in status response")
 	}
-	if _, ok := result["serving"]; !ok {
-		t.Fatal("missing 'serving'")
+	if _, ok := result["sessions"]; !ok {
+		t.Fatal("missing 'sessions' field in status response")
 	}
 }
 
@@ -73,10 +73,10 @@ func TestCORSHeaders(t *testing.T) {
 	}
 }
 
-func TestSSEReceivesEvents(t *testing.T) {
+func TestSSEReceivesInitialStatus(t *testing.T) {
 	_, addr := newTestServer(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	lines := make(chan string, 10)
@@ -91,43 +91,23 @@ func TestSSEReceivesEvents(t *testing.T) {
 		for scanner.Scan() {
 			if line := scanner.Text(); strings.HasPrefix(line, "data:") {
 				lines <- line
+				return
 			}
 		}
 	}()
 
-	time.Sleep(50 * time.Millisecond)
-	http.Post("http://"+addr+"/api/serve", "application/json", strings.NewReader(`{"port":0}`))
-	defer http.Post("http://"+addr+"/api/stop-serve", "application/json", nil) //nolint
-
 	select {
 	case line := <-lines:
-		// Gin SSEvent format: "data:{...}" or "data: {...}"
 		jsonPart := strings.TrimPrefix(strings.TrimPrefix(line, "data: "), "data:")
 		var ev map[string]interface{}
 		if err := json.Unmarshal([]byte(jsonPart), &ev); err != nil {
 			t.Fatalf("parse SSE JSON %q: %v", line, err)
 		}
-		if ev["event"] == nil {
-			t.Fatal("missing 'event' field")
+		// Initial event should be the full status snapshot.
+		if _, ok := ev["daemon"]; !ok {
+			t.Fatalf("initial SSE event missing 'daemon' field, got: %v", ev)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for SSE event")
-	}
-}
-
-func TestGetShortcuts(t *testing.T) {
-	_, addr := newTestServer(t)
-	resp, err := http.Get("http://" + addr + "/api/shortcuts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("want 200, got %d", resp.StatusCode)
-	}
-	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
-	if _, ok := result["switch_next"]; !ok {
-		t.Fatal("missing 'switch_next'")
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for initial SSE status event")
 	}
 }

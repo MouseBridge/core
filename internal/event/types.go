@@ -1,12 +1,18 @@
 package event
 
+// P2P wire message types (v1.5.2-final-mvp protocol).
 const (
-	TypeHandshake     = "handshake"
-	TypePairRequest   = "pair_request"
-	TypePairPin       = "pair_pin"
+	// Connection phase
+	TypeHello = "hello"
+
+	// Pairing phase
+	TypePairChallenge = "pair_challenge"
 	TypePairConfirm   = "pair_confirm"
 	TypePairAccept    = "pair_accept"
 	TypePairReject    = "pair_reject"
+	TypePairRetry     = "pair_retry"
+
+	// Session phase
 	TypePing          = "ping"
 	TypePong          = "pong"
 	TypeMouseMove     = "mouse_move"
@@ -28,27 +34,43 @@ type Message struct {
 	Payload interface{} `json:"payload"`
 }
 
-// HandshakePayload is exchanged on first connect.
-type HandshakePayload struct {
-	DeviceID string `json:"device_id"`
-	Name     string `json:"name"`
-	Platform string `json:"platform"`
+// HelloPayload is exchanged on first connect.
+type HelloPayload struct {
+	DeviceID           string `json:"device_id"`
+	DisplayID          string `json:"display_id"`
+	Name               string `json:"name"`
+	ProtocolVersion    int    `json:"protocol_version"`
+	SupportsRemembered bool   `json:"supports_remembered"`
 }
 
-// PairRequestPayload is sent by the host to initiate pairing.
-type PairRequestPayload struct {
-	DeviceID string `json:"device_id"`
-	Name     string `json:"name"`
+// PairChallengePayload is sent by server to client to initiate PIN pairing.
+type PairChallengePayload struct {
+	PairingID  string `json:"pairing_id"`
+	ServerName string `json:"server_name"`
 }
 
-// PairPinPayload carries the PIN from slave to host.
-type PairPinPayload struct {
-	PIN string `json:"pin"`
-}
-
-// PairConfirmPayload carries the PIN entered by the host.
+// PairConfirmPayload carries the PIN entered by the client (host).
 type PairConfirmPayload struct {
-	PIN string `json:"pin"`
+	PairingID string `json:"pairing_id"`
+	PIN       string `json:"pin"`
+}
+
+// PairAcceptPayload is sent by server on successful pairing.
+type PairAcceptPayload struct {
+	Remembered bool   `json:"remembered"`
+	SecretID   string `json:"secret_id,omitempty"`
+	PairSecret string `json:"pair_secret,omitempty"`
+}
+
+// PairRejectPayload is sent on final rejection.
+type PairRejectPayload struct {
+	Reason string `json:"reason"`
+}
+
+// PairRetryPayload notifies client of wrong PIN with remaining attempts.
+type PairRetryPayload struct {
+	PairingID         string `json:"pairing_id"`
+	AttemptsRemaining int    `json:"attempts_remaining"`
 }
 
 // PingPayload is empty.
@@ -101,10 +123,4 @@ type SwitchRequestPayload struct {
 	Edge      string  `json:"edge,omitempty"`
 	EntryPct  float64 `json:"entry_pct,omitempty"`
 	Direction string  `json:"direction,omitempty"`
-}
-
-// TrustedDevice is persisted to trusted.json after pairing.
-type TrustedDevice struct {
-	DeviceID string `json:"device_id"`
-	Name     string `json:"name"`
 }

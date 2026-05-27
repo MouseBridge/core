@@ -9,23 +9,20 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/mousebridge/core/internal/daemon"
-	"github.com/mousebridge/core/internal/shortcuts"
 )
 
 // Server is the HTTP API server for browser/UI clients.
 type Server struct {
-	d         *daemon.Daemon
-	hub       *sseHub
-	shortcuts *shortcuts.Manager
-	srv       *http.Server
+	d   *daemon.Daemon
+	hub *sseHub
+	srv *http.Server
 }
 
 // New creates a Server backed by the given daemon.
 func New(d *daemon.Daemon) *Server {
 	return &Server{
-		d:         d,
-		hub:       newSSEHub(),
-		shortcuts: shortcuts.New(),
+		d:   d,
+		hub: newSSEHub(),
 	}
 }
 
@@ -35,9 +32,16 @@ func (s *Server) Start(ln net.Listener) {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(corsMiddleware())
+	r.Use(bodyLimitMiddleware(s.d.Config().JSONBodyLimitBytes))
 	s.routes(r)
 
-	s.srv = &http.Server{Handler: r}
+	s.srv = &http.Server{
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		// WriteTimeout intentionally 0: SSE is a long-lived stream.
+	}
 	go s.fanOutEvents()
 	go s.srv.Serve(ln) //nolint:errcheck
 }
@@ -54,21 +58,14 @@ func (s *Server) Stop() {
 
 func (s *Server) routes(r *gin.Engine) {
 	api := r.Group("/api")
-	api.POST("/serve", s.handleServe)
-	api.POST("/connect", s.handleConnect)
-	api.POST("/stop-serve", s.handleStopServe)
-	api.POST("/disconnect", s.handleDisconnect)
-	api.POST("/pair/accept", s.handlePairAccept)
-	api.POST("/pair/reject", s.handlePairReject)
-	api.POST("/pair/pin", s.handlePairPIN)
 	api.GET("/status", s.handleStatus)
-	api.GET("/devices", s.handleDevices)
-	api.GET("/shortcuts", s.handleShortcuts)
-	api.PUT("/shortcuts", s.handleShortcuts)
-	api.GET("/trusted", s.handleTrust)
-	api.POST("/trusted", s.handleTrust)
-	api.DELETE("/trusted", s.handleTrust)
 	api.GET("/events", s.handleSSE)
+	api.POST("/connect", s.handleConnect)
+	api.POST("/pair/pin", s.handlePairPIN)
+	api.POST("/pair/reject", s.handlePairReject)
+	api.GET("/remembered", s.handleRememberedList)
+	api.DELETE("/remembered/:device_id", s.handleRememberedDelete)
+	api.PATCH("/remembered/:device_id", s.handleRememberedRename)
 }
 
 func (s *Server) fanOutEvents() {
@@ -80,7 +77,6 @@ func (s *Server) fanOutEvents() {
 }
 
 // NewChanListener wraps a channel of net.Conn as a net.Listener.
-// Used to feed HTTP connections dispatched by transport.Serve into the Gin server.
 func NewChanListener(ch <-chan net.Conn, addr net.Addr) net.Listener {
 	return &chanListener{ch: ch, addr: addr}
 }
@@ -104,12 +100,19 @@ func (l *chanListener) Addr() net.Addr { return l.addr }
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
+		c.Next()
+	}
+}
+
+func bodyLimitMiddleware(limit int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		c.Next()
 	}
 }

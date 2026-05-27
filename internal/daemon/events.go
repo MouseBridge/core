@@ -1,36 +1,32 @@
 package daemon
 
-// Command is sent by a CLI client to the daemon over Unix Socket.
+import "github.com/mousebridge/core/internal/p2p"
+
+// BusEvent is the daemon-level event type broadcast to all subscribers (SSE, etc.).
+// It is a direct alias of p2p.BusEvent so the two layers share one type.
+type BusEvent = p2p.BusEvent
+
+// Command is a legacy IPC command sent from CLI tools over Unix socket.
+// New code should use the HTTP API instead.
 type Command struct {
-	Cmd      string `json:"cmd"`                 // "serve"|"connect"|"pair_accept"|"pair_reject"|"pair_pin"|"status"|"disconnect"|"stop_serve"|"trust"|"untrust"|"trusted_list"
-	IP       string `json:"ip,omitempty"`        // for "connect"
-	Port     int    `json:"port,omitempty"`      // for "connect"
-	PIN      string `json:"pin,omitempty"`       // for "pair_pin"
-	DeviceID string `json:"device_id,omitempty"` // for "disconnect"|"trust"|"untrust"
-	Name     string `json:"name,omitempty"`      // for "trust"
+	Cmd      string `json:"cmd"`
+	IP       string `json:"ip,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	PIN      string `json:"pin,omitempty"`
+	DeviceID string `json:"device_id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	PairingID string `json:"pairing_id,omitempty"`
 }
 
-// Event is pushed from the daemon to all connected CLI clients.
+// Event is a legacy IPC event pushed from daemon to CLI tools over Unix socket.
+// New code should use SSE (GET /api/events) instead.
 type Event struct {
-	Event    string         `json:"event"`               // "listening"|"pair_request"|"paired"|"connected"|"disconnected"|"log"|"status"|"error"
-	Port     int            `json:"port,omitempty"`      // for "listening" and "status"
-	DeviceID string         `json:"device_id,omitempty"` // for device events
-	Name     string         `json:"name,omitempty"`      // for device events
-	PIN      string         `json:"pin,omitempty"`       // for "pair_request"
-	Role     string         `json:"role,omitempty"`      // for "pair_request": "host"|"slave"
-	IP       string         `json:"ip,omitempty"`        // for "connected"
-	Msg      string         `json:"msg,omitempty"`       // for "log" and "error"
-	Devices  []DeviceStatus `json:"devices"`             // for "status"
-	Serving  bool           `json:"serving,omitempty"`   // for "status"
-	LocalID  string         `json:"local_id,omitempty"`  // for "status"
-	LocalName string        `json:"local_name,omitempty"` // for "status"
-}
-
-// DeviceStatus is included in "status" events.
-type DeviceStatus struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	IP           string  `json:"ip"`
-	Role         string  `json:"role"` // "host" | "slave"
-	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	Event    string `json:"event"`
+	Port     int    `json:"port,omitempty"`
+	DeviceID string `json:"device_id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	PIN      string `json:"pin,omitempty"`
+	Role     string `json:"role,omitempty"`
+	IP       string `json:"ip,omitempty"`
+	Msg      string `json:"msg,omitempty"`
 }
