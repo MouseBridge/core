@@ -80,6 +80,18 @@ func (d *Daemon) State() StatusSnapshot {
 		pendingStatuses = append(pendingStatuses, ps)
 	}
 
+	// Also include outbound (client-side) pairings from OutboundTracker.
+	for _, op := range d.tracker.Snapshot() {
+		pendingStatuses = append(pendingStatuses, PendingPairStatus{
+			PairingID:     op.PairingID,
+			ConnectionID:  op.ConnectionID,
+			Name:          op.RemoteName,
+			DisplayID:     op.RemoteDisplayID,
+			Role:          "client",
+			ExpiresAt:     op.ExpiresAt.Unix(),
+		})
+	}
+
 	addr := d.Addr()
 
 	return StatusSnapshot{

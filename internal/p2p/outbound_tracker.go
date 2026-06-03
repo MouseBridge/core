@@ -49,3 +49,15 @@ func (t *OutboundTracker) Remove(pairingID string) {
 	delete(t.pairs, pairingID)
 	t.mu.Unlock()
 }
+
+// Snapshot returns a copy of all current outbound pairings.
+func (t *OutboundTracker) Snapshot() []*OutboundPairing {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]*OutboundPairing, 0, len(t.pairs))
+	for _, p := range t.pairs {
+		cp := *p
+		out = append(out, &cp)
+	}
+	return out
+}
