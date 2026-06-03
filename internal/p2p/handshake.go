@@ -24,22 +24,22 @@ type ServerHost interface {
 
 // BusEvent carries session lifecycle updates to the daemon for broadcasting.
 type BusEvent struct {
-	Kind string // "error","log","pair_request","pair_retry","pair_reject","pair_timeout","paired","session_connected","session_disconnected"
+	Kind string `json:"kind"` // "error","log","pair_request","pair_retry","pair_reject","pair_timeout","paired","session_connected","session_disconnected"
 
-	PairingID         string
-	ConnectionID      string
-	ClaimedDeviceID   string
-	DisplayID         string
-	Name              string
-	RemoteIP          string
-	AttemptsRemaining int
-	Remembered        bool
+	PairingID         string `json:"pairing_id,omitempty"`
+	ConnectionID      string `json:"connection_id,omitempty"`
+	ClaimedDeviceID   string `json:"claimed_device_id,omitempty"`
+	DisplayID         string `json:"display_id,omitempty"`
+	Name              string `json:"name,omitempty"`
+	RemoteIP          string `json:"remote_ip,omitempty"`
+	AttemptsRemaining int    `json:"attempts_remaining,omitempty"`
+	Remembered        bool   `json:"remembered,omitempty"`
 
-	DeviceID string // authenticated device_id (post-auth events)
-	Role     string // "server"|"client"
-	DisplayPIN string
+	DeviceID   string `json:"device_id,omitempty"`
+	Role       string `json:"role,omitempty"`
+	DisplayPIN string `json:"display_pin,omitempty"`
 
-	Msg string
+	Msg string `json:"msg,omitempty"`
 }
 
 // HandleInbound drives the inbound pairing flow for one new P2P connection.

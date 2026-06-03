@@ -261,7 +261,7 @@ func (d *Daemon) Connect(host string, port int) {
 			d.broadcast(BusEvent{Kind: "error", Msg: "connect: " + err.Error()})
 			return
 		}
-		p2p.DialAndPair(c, d.identity.DeviceID, d.identity.DisplayID, d.identity.Name, d, d.tracker, d.emitBus)
+		p2p.DialAndPair(c, d.identity.DeviceID, d.identity.DisplayID, d.identity.Name, d, d.tracker, d.rem, d.emitBus)
 	}()
 }
 

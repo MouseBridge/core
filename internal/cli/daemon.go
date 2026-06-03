@@ -21,14 +21,18 @@ func DaemonCmd() *cobra.Command {
 		RunE:  runDaemon,
 	}
 	cmd.Flags().StringArray("connect", nil, "connect to remote device IP on startup (repeatable)")
+	cmd.Flags().String("data-dir", "", "data directory (default: ~/.mousebridge)")
 	return cmd
 }
 
 func runDaemon(cmd *cobra.Command, _ []string) error {
 	connectIPs, _ := cmd.Flags().GetStringArray("connect")
 
-	home, _ := os.UserHomeDir()
-	dataDir := filepath.Join(home, ".mousebridge")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	if dataDir == "" {
+		home, _ := os.UserHomeDir()
+		dataDir = filepath.Join(home, ".mousebridge")
+	}
 	configPath := filepath.Join(dataDir, "config.json")
 
 	d, err := daemon.New(daemon.Options{
@@ -58,8 +62,8 @@ func runDaemon(cmd *cobra.Command, _ []string) error {
 	<-sigCh
 
 	log.Println("[daemon] shutting down...")
+	d.Stop()      // closes sub channels → SSE streams exit → Shutdown unblocks
 	apiSrv.Stop()
-	d.Stop()
 	log.Println("[daemon] done")
 	return nil
 }
