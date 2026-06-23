@@ -31,9 +31,30 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
   "sessions": [],
   "pending_pairs": [],
   "remembered_devices": [],
+  "helper_runtime": {
+    "executable_found": true,
+    "executable_path": "/usr/local/bin/mousebridge-helper",
+    "launch_agent_label": "com.mousebridge.helper.abcd1234",
+    "launch_agent_plist": "/Users/name/Library/LaunchAgents/com.mousebridge.helper.abcd1234.plist",
+    "launch_agent_installed": true,
+    "launch_agent_loaded": true,
+    "accessibility_granted": true,
+    "connected": true,
+    "client_count": 1,
+    "logs_dir": "/Users/name/.mousebridge/logs",
+    "recommended_action": "ready"
+  },
   "unsafe_http_lan": false
 }
 ```
+
+`helper_runtime.recommended_action` 当前可能返回：
+
+- `ready`
+- `install_helper_binary`
+- `install_launch_agent`
+- `grant_accessibility`
+- `restart_launch_agent`
 
 ## 设备连接
 
@@ -58,6 +79,17 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 | `GET` | `/api/remembered` | — | remembered 设备列表 |
 | `PATCH` | `/api/remembered/:device_id` | `{"alias":"Desk Mac"}` | 更新别名 |
 | `DELETE` | `/api/remembered/:device_id` | — | 删除 remembered 设备 |
+
+## 本机 helper 托管
+
+这些接口主要给 Web UI 的 `Setup` 页面使用。
+
+| 方法 | 路径 | 请求体 | 说明 |
+|------|------|--------|------|
+| `GET` | `/api/local/helper` | — | 读取本机 helper 运行时状态 |
+| `POST` | `/api/local/helper/install` | `{}` | 安装或重装 helper LaunchAgent |
+| `POST` | `/api/local/helper/restart` | `{}` | 重启 helper |
+| `POST` | `/api/local/helper/open-accessibility` | `{}` | 打开 macOS Accessibility 设置页 |
 
 ## 快捷键
 

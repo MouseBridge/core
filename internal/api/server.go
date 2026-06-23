@@ -59,8 +59,12 @@ func (s *Server) Stop() {
 func (s *Server) routes(r *gin.Engine) {
 	api := r.Group("/api")
 	api.GET("/status", s.handleStatus)
+	api.GET("/local/helper", s.handleLocalHelperStatus)
 	api.GET("/events", s.handleSSE)
 	api.POST("/connect", s.handleConnect)
+	api.POST("/local/helper/install", s.handleLocalHelperInstall)
+	api.POST("/local/helper/restart", s.handleLocalHelperRestart)
+	api.POST("/local/helper/open-accessibility", s.handleLocalHelperOpenAccessibility)
 	api.DELETE("/sessions/:device_id", s.handleSessionDelete)
 	api.POST("/pair/pin", s.handlePairPIN)
 	api.POST("/pair/reject", s.handlePairReject)

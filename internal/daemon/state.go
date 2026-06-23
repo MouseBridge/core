@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"github.com/mousebridge/core/internal/localhelper"
 	"github.com/mousebridge/core/internal/remembered"
 )
 
@@ -36,13 +37,14 @@ type DaemonInfo struct {
 
 // StatusSnapshot is the full status returned by GET /api/status and the SSE status event.
 type StatusSnapshot struct {
-	Daemon            DaemonInfo              `json:"daemon"`
-	Listening         bool                    `json:"listening"`
-	ListenAddr        string                  `json:"listen_addr,omitempty"`
-	Sessions          []SessionStatus         `json:"sessions"`
-	PendingPairs      []PendingPairStatus     `json:"pending_pairs"`
-	RememberedDevices []remembered.DTO        `json:"remembered_devices"`
-	UnsafeHTTPLAN    bool                    `json:"unsafe_http_lan"`
+	Daemon            DaemonInfo          `json:"daemon"`
+	Listening         bool                `json:"listening"`
+	ListenAddr        string              `json:"listen_addr,omitempty"`
+	Sessions          []SessionStatus     `json:"sessions"`
+	PendingPairs      []PendingPairStatus `json:"pending_pairs"`
+	RememberedDevices []remembered.DTO    `json:"remembered_devices"`
+	HelperRuntime     localhelper.Status  `json:"helper_runtime"`
+	UnsafeHTTPLAN     bool                `json:"unsafe_http_lan"`
 }
 
 // State returns a consistent snapshot of the daemon's current state.
@@ -83,12 +85,12 @@ func (d *Daemon) State() StatusSnapshot {
 	// Also include outbound (client-side) pairings from OutboundTracker.
 	for _, op := range d.tracker.Snapshot() {
 		pendingStatuses = append(pendingStatuses, PendingPairStatus{
-			PairingID:     op.PairingID,
-			ConnectionID:  op.ConnectionID,
-			Name:          op.RemoteName,
-			DisplayID:     op.RemoteDisplayID,
-			Role:          "client",
-			ExpiresAt:     op.ExpiresAt.Unix(),
+			PairingID:    op.PairingID,
+			ConnectionID: op.ConnectionID,
+			Name:         op.RemoteName,
+			DisplayID:    op.RemoteDisplayID,
+			Role:         "client",
+			ExpiresAt:    op.ExpiresAt.Unix(),
 		})
 	}
 
@@ -105,6 +107,7 @@ func (d *Daemon) State() StatusSnapshot {
 		Sessions:          sessions,
 		PendingPairs:      pendingStatuses,
 		RememberedDevices: d.rem.List(),
-		UnsafeHTTPLAN:    d.cfg.UnsafeHTTPLAN,
+		HelperRuntime:     d.LocalHelperStatus(),
+		UnsafeHTTPLAN:     d.cfg.UnsafeHTTPLAN,
 	}
 }

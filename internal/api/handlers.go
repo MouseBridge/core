@@ -18,6 +18,10 @@ func (s *Server) handleStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, s.d.State())
 }
 
+func (s *Server) handleLocalHelperStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, s.d.LocalHelperStatus())
+}
+
 func (s *Server) handleConnect(c *gin.Context) {
 	var req struct {
 		Host string `json:"host"`
@@ -33,6 +37,30 @@ func (s *Server) handleConnect(c *gin.Context) {
 	}
 	s.d.Connect(req.Host, req.Port)
 	c.JSON(http.StatusAccepted, gin.H{"ok": true})
+}
+
+func (s *Server) handleLocalHelperInstall(c *gin.Context) {
+	if err := s.d.InstallLocalHelper(); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("helper_install_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, s.d.LocalHelperStatus())
+}
+
+func (s *Server) handleLocalHelperRestart(c *gin.Context) {
+	if err := s.d.RestartLocalHelper(); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("helper_restart_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, s.d.LocalHelperStatus())
+}
+
+func (s *Server) handleLocalHelperOpenAccessibility(c *gin.Context) {
+	if err := s.d.OpenLocalHelperAccessibility(); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("helper_accessibility_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (s *Server) handleSessionDelete(c *gin.Context) {

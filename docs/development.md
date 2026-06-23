@@ -45,9 +45,10 @@ go test ./...
 推荐顺序：
 
 1. 两台机器都运行 `mousebridge daemon`
-2. 两台机器都安装并启动 `mousebridge-helper` LaunchAgent
-3. 用 Web UI 发起连接、输入 PIN、确认会话建立
-4. 再验证热键切换、边缘切换、紧急返回键
+2. 两台机器都打开 Web UI `Setup` 页面，先把 daemon reachability、helper LaunchAgent、Accessibility、helper reconnect 全部做成绿色
+3. 确认 daemon 不是 loopback-only；双机时必须让对端能访问该地址
+4. 再用 Web UI 发起连接、输入 PIN、确认会话建立
+5. 最后验证热键切换、边缘切换、紧急返回键
 
 ## 长时间跑与压测工具
 

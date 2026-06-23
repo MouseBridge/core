@@ -18,6 +18,7 @@ import (
 	"github.com/mousebridge/core/internal/device"
 	"github.com/mousebridge/core/internal/event"
 	"github.com/mousebridge/core/internal/helper"
+	"github.com/mousebridge/core/internal/localhelper"
 	"github.com/mousebridge/core/internal/p2p"
 	"github.com/mousebridge/core/internal/pending"
 	"github.com/mousebridge/core/internal/remembered"
@@ -34,14 +35,16 @@ type Options struct {
 // Daemon owns all long-running state.
 type Daemon struct {
 	configPath string
+	dataDir    string
 	cfg        *config.Config
 	identity   device.Identity
 
-	rem     *remembered.Store
-	pending *pending.Manager
-	tracker *p2p.OutboundTracker
-	helper  *helper.Manager
-	ctrl    *switch_.Controller
+	rem         *remembered.Store
+	pending     *pending.Manager
+	tracker     *p2p.OutboundTracker
+	helper      *helper.Manager
+	localHelper *localhelper.Runtime
+	ctrl        *switch_.Controller
 
 	pausedMu sync.RWMutex
 	paused   bool
@@ -107,6 +110,7 @@ func New(opts Options) (*Daemon, error) {
 
 	d := &Daemon{
 		configPath: opts.ConfigPath,
+		dataDir:    opts.DataDir,
 		cfg:        cfg,
 		identity:   identity,
 		rem:        rem,
@@ -126,6 +130,7 @@ func New(opts Options) (*Daemon, error) {
 		d.handleHelperEdge,
 		d.handleHelperInput,
 	)
+	d.localHelper = localhelper.NewRuntime(opts.DataDir, d.helper.ClientCount)
 	return d, nil
 }
 
@@ -405,6 +410,9 @@ func (d *Daemon) Addr() string {
 // Config returns the daemon config.
 func (d *Daemon) Config() *config.Config { return d.cfg }
 
+// DataDir returns the daemon data directory.
+func (d *Daemon) DataDir() string { return d.dataDir }
+
 // UpdateHotkeys replaces the daemon hotkeys, persists them, and pushes them to helpers.
 func (d *Daemon) UpdateHotkeys(h config.Hotkeys) error {
 	d.cfg.Hotkeys = h
@@ -437,6 +445,38 @@ func (d *Daemon) HelperSocketPath() string {
 		return ""
 	}
 	return d.helper.SocketPath()
+}
+
+// LocalHelperStatus returns the current local helper runtime status.
+func (d *Daemon) LocalHelperStatus() localhelper.Status {
+	if d.localHelper == nil {
+		return localhelper.Status{}
+	}
+	return d.localHelper.Status()
+}
+
+// InstallLocalHelper installs or refreshes the helper LaunchAgent.
+func (d *Daemon) InstallLocalHelper() error {
+	if d.localHelper == nil {
+		return fmt.Errorf("local helper runtime is not configured")
+	}
+	return d.localHelper.Install()
+}
+
+// RestartLocalHelper restarts the helper LaunchAgent.
+func (d *Daemon) RestartLocalHelper() error {
+	if d.localHelper == nil {
+		return fmt.Errorf("local helper runtime is not configured")
+	}
+	return d.localHelper.Restart()
+}
+
+// OpenLocalHelperAccessibility opens the macOS Accessibility settings pane.
+func (d *Daemon) OpenLocalHelperAccessibility() error {
+	if d.localHelper == nil {
+		return fmt.Errorf("local helper runtime is not configured")
+	}
+	return d.localHelper.OpenAccessibility()
 }
 
 func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {

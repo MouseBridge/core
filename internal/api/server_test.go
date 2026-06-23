@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +56,62 @@ func TestStatus(t *testing.T) {
 	}
 	if _, ok := result["sessions"]; !ok {
 		t.Fatal("missing 'sessions' field in status response")
+	}
+	if _, ok := result["helper_runtime"]; !ok {
+		t.Fatal("missing 'helper_runtime' field in status response")
+	}
+}
+
+func TestLocalHelperStatus(t *testing.T) {
+	_, _, addr := newTestServer(t)
+	resp, err := http.Get("http://" + addr + "/api/local/helper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := result["recommended_action"]; !ok {
+		t.Fatal("missing recommended_action in helper status response")
+	}
+}
+
+func TestLocalHelperInstall(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "helper-args.log")
+	helperPath := filepath.Join(dir, "mousebridge-helper")
+	script := "#!/bin/sh\nprintf '%s\n' \"$@\" >> " + logPath + "\n"
+	if err := os.WriteFile(helperPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MB_HELPER_PROGRAM", helperPath)
+
+	_, _, addr := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/local/helper/install", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := string(data)
+	if !strings.Contains(args, "install-launch-agent") {
+		t.Fatalf("helper args %q missing install-launch-agent", args)
+	}
+	if !strings.Contains(args, "--data-dir") {
+		t.Fatalf("helper args %q missing --data-dir", args)
 	}
 }
 
