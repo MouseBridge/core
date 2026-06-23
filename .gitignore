@@ -36,3 +36,4 @@ helper/macos/*.resolved
 
 # Git worktrees
 .worktrees/
+/.cache
