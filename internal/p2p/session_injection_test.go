@@ -65,3 +65,36 @@ func TestRunSessionForwardsMouseMoveToHelper(t *testing.T) {
 		t.Fatal("timed out waiting for forwarded helper input")
 	}
 }
+
+func TestRunSessionForwardsTextToHelper(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	host := &fakeSessionHost{inputs: make(chan helper.InputPayload, 1)}
+
+	go RunSession(transport.NewConn(server), "1234567890abcdef1234567890abcdef", "Remote", "client", host, func(BusEvent) {})
+
+	msg := event.Message{
+		V:       1,
+		Seq:     1,
+		Type:    event.TypeText,
+		Ts:      time.Now().UnixMilli(),
+		Payload: event.TextPayload{Text: "hello"},
+	}
+	if err := transport.NewConn(client).Send(msg); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	select {
+	case input := <-host.inputs:
+		if input.Kind != "text" {
+			t.Fatalf("kind=%q want text", input.Kind)
+		}
+		if input.Text != "hello" {
+			t.Fatalf("text=%q want hello", input.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for forwarded helper input")
+	}
+}

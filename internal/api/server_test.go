@@ -226,11 +226,43 @@ func TestHelperInputEndpoint(t *testing.T) {
 	}
 }
 
+func TestHelperInputBatchEndpoint(t *testing.T) {
+	_, _, addr := newTestServer(t)
+
+	body := bytes.NewBufferString(`{"inputs":[{"kind":"mouse_move","dx":12,"dy":-6},{"kind":"text","text":"hello"}],"step_delay_ms":0}`)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/helper/input/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+}
+
 func TestSessionInputEndpointWithoutSession(t *testing.T) {
 	_, _, addr := newTestServer(t)
 
 	body := bytes.NewBufferString(`{"kind":"mouse_move","dx":12,"dy":-6}`)
 	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/session/input", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestSessionInputBatchEndpointWithoutSession(t *testing.T) {
+	_, _, addr := newTestServer(t)
+
+	body := bytes.NewBufferString(`{"device_id":"abc","inputs":[{"kind":"text","text":"hello"}],"step_delay_ms":0}`)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/session/input/batch", body)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

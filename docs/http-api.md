@@ -117,13 +117,19 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 | 方法 | 路径 | 请求体 | 说明 |
 |------|------|--------|------|
 | `POST` | `/api/helper/input` | `{"kind":"mouse_move","dx":12,"dy":-4}` | 直接向本机 helper 注入输入 |
+| `POST` | `/api/helper/input/batch` | `{"inputs":[...],"step_delay_ms":35}` | 按顺序向本机 helper 注入一组输入 |
 | `POST` | `/api/session/input` | `{"device_id":"...","kind":"mouse_move","dx":12,"dy":-4}` | 向指定远端会话发送输入 |
+| `POST` | `/api/session/input/batch` | `{"device_id":"...","inputs":[...],"step_delay_ms":35}` | 按顺序向指定远端会话发送一组输入 |
 
 `/api/helper/input` 支持：
 
 - `mouse_move`
+- `mouse_button`
 - `scroll`
 - `key_tap`
+- `key_down`
+- `key_up`
+- `text`
 
 `/api/session/input` 支持：
 
@@ -131,6 +137,8 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 - `mouse_button`
 - `key_down`
 - `key_up`
+- `key_tap`
+- `text`
 - `scroll`
 
 ## SSE 事件

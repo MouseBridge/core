@@ -97,6 +97,15 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			})
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv key_up code=%d mods=%d latency=%.1fms", pay.Code, pay.Mods, latency))
 
+		case event.TypeText:
+			var pay event.TextPayload
+			_ = event.DecodePayload(msg, &pay)
+			h.PushHelperInput(helper.InputPayload{
+				Kind: "text",
+				Text: pay.Text,
+			})
+			emitVerboseSessionLog(emit, fmt.Sprintf("recv text len=%d latency=%.1fms", len(pay.Text), latency))
+
 		case event.TypeScroll:
 			var pay event.ScrollPayload
 			_ = event.DecodePayload(msg, &pay)

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -171,15 +173,35 @@ func (s *Server) handleHelperInput(c *gin.Context) {
 		return
 	}
 
-	switch req.Kind {
-	case "mouse_move", "scroll", "key_tap":
-	default:
-		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "kind must be mouse_move, scroll, or key_tap"))
+	if err := validateHelperInputKind(req.Kind); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
 		return
 	}
 
 	s.d.PushHelperInput(req)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleHelperInputBatch(c *gin.Context) {
+	var req struct {
+		Inputs      []helper.InputPayload `json:"inputs"`
+		StepDelayMs int                   `json:"step_delay_ms"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+	if err := validateBatch(req.Inputs, req.StepDelayMs, true); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
+		return
+	}
+	for _, input := range req.Inputs {
+		s.d.PushHelperInput(input)
+		if req.StepDelayMs > 0 {
+			time.Sleep(time.Duration(req.StepDelayMs) * time.Millisecond)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "count": len(req.Inputs)})
 }
 
 func (s *Server) handleSessionInput(c *gin.Context) {
@@ -192,10 +214,8 @@ func (s *Server) handleSessionInput(c *gin.Context) {
 		return
 	}
 
-	switch req.Kind {
-	case "mouse_move", "mouse_button", "key_down", "key_up", "scroll":
-	default:
-		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "kind must be mouse_move, mouse_button, key_down, key_up, or scroll"))
+	if err := validateSessionInputKind(req.Kind); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
 		return
 	}
 
@@ -204,4 +224,69 @@ func (s *Server) handleSessionInput(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleSessionInputBatch(c *gin.Context) {
+	var req struct {
+		DeviceID    string                `json:"device_id"`
+		Inputs      []helper.InputPayload `json:"inputs"`
+		StepDelayMs int                   `json:"step_delay_ms"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+	if err := validateBatch(req.Inputs, req.StepDelayMs, false); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
+		return
+	}
+	for _, input := range req.Inputs {
+		if err := s.d.SendSessionInput(req.DeviceID, input); err != nil {
+			c.JSON(http.StatusBadRequest, apiErr("not_found", err.Error()))
+			return
+		}
+		if req.StepDelayMs > 0 {
+			time.Sleep(time.Duration(req.StepDelayMs) * time.Millisecond)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "count": len(req.Inputs)})
+}
+
+func validateBatch(inputs []helper.InputPayload, stepDelayMs int, helperOnly bool) error {
+	if len(inputs) == 0 {
+		return fmt.Errorf("inputs must not be empty")
+	}
+	if stepDelayMs < 0 {
+		return fmt.Errorf("step_delay_ms must be >= 0")
+	}
+	for _, input := range inputs {
+		var err error
+		if helperOnly {
+			err = validateHelperInputKind(input.Kind)
+		} else {
+			err = validateSessionInputKind(input.Kind)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateHelperInputKind(kind string) error {
+	switch kind {
+	case "mouse_move", "mouse_button", "scroll", "key_tap", "key_down", "key_up", "text":
+		return nil
+	default:
+		return fmt.Errorf("kind must be mouse_move, mouse_button, scroll, key_tap, key_down, key_up, or text")
+	}
+}
+
+func validateSessionInputKind(kind string) error {
+	switch kind {
+	case "mouse_move", "mouse_button", "key_down", "key_up", "key_tap", "scroll", "text":
+		return nil
+	default:
+		return fmt.Errorf("kind must be mouse_move, mouse_button, key_down, key_up, key_tap, scroll, or text")
+	}
 }

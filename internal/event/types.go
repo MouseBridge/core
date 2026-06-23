@@ -19,6 +19,7 @@ const (
 	TypeMouseButton   = "mouse_button"
 	TypeKeyDown       = "key_down"
 	TypeKeyUp         = "key_up"
+	TypeText          = "text"
 	TypeScroll        = "scroll"
 	TypeSwitchRequest = "switch_request"
 	TypeSwitchAck     = "switch_ack"
@@ -110,6 +111,11 @@ type KeyDownPayload struct {
 type KeyUpPayload struct {
 	Code int `json:"code"`
 	Mods int `json:"mods"`
+}
+
+// TextPayload carries a unicode string for injection.
+type TextPayload struct {
+	Text string `json:"text"`
 }
 
 // ScrollPayload carries scroll deltas.

@@ -73,6 +73,7 @@ type InputPayload struct {
 	DY        float64 `json:"dy,omitempty"`
 	KeyCode   int64   `json:"key_code,omitempty"`
 	Modifiers int64   `json:"modifiers,omitempty"`
+	Text      string  `json:"text,omitempty"`
 	Button    string  `json:"button,omitempty"`
 	Pressed   bool    `json:"pressed,omitempty"`
 }

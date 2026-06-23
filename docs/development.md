@@ -57,10 +57,12 @@ go test ./...
 ```bash
 ./verify/latency-benchmark.sh http://127.0.0.1:39172
 ./verify/session-input-burst.sh http://127.0.0.1:39172 <device-id> 2000
+./verify/local-session-smoke.sh http://127.0.0.1:39273 http://127.0.0.1:39272 "MouseBridge smoke"
 ```
 
 - `latency-benchmark.sh`：周期采样 `/api/status` 中的 `avg_latency_ms`
 - `session-input-burst.sh`：通过 `/api/session/input` 打突发输入，检查转发链路稳定性
+- `local-session-smoke.sh`：本机双端场景下自动连接/自动配对（若未 remembered），然后发送一段真实的 move + click + text 序列，验证接收端 helper 是否真的把动作注入到 macOS
 
 ## 日志降噪与调试
 

@@ -74,7 +74,9 @@ func (s *Server) routes(r *gin.Engine) {
 	api.GET("/shortcuts", s.handleShortcutsGet)
 	api.PUT("/shortcuts", s.handleShortcutsPut)
 	api.POST("/helper/input", s.handleHelperInput)
+	api.POST("/helper/input/batch", s.handleHelperInputBatch)
 	api.POST("/session/input", s.handleSessionInput)
+	api.POST("/session/input/batch", s.handleSessionInputBatch)
 }
 
 func (s *Server) fanOutEvents() {

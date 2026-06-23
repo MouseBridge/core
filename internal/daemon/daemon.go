@@ -581,7 +581,7 @@ func (d *Daemon) PushHelperInput(input helper.InputPayload) {
 
 // SendSessionInput sends one input event to an active remote session.
 func (d *Daemon) SendSessionInput(deviceID string, input helper.InputPayload) error {
-	msg, err := sessionInputMessage(input)
+	msgs, err := sessionInputMessages(input)
 	if err != nil {
 		return err
 	}
@@ -592,7 +592,12 @@ func (d *Daemon) SendSessionInput(deviceID string, input helper.InputPayload) er
 		if deviceID != "" && id != deviceID {
 			continue
 		}
-		return c.Send(msg)
+		for _, msg := range msgs {
+			if err := c.Send(msg); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	return fmt.Errorf("no active session for device %q", deviceID)
 }
@@ -603,31 +608,47 @@ func helperSocketPath(dataDir string, port int) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("mb-helper-%d-%s.sock", port, suffix))
 }
 
-func sessionInputMessage(input helper.InputPayload) (event.Message, error) {
+func sessionInputMessages(input helper.InputPayload) ([]event.Message, error) {
 	base := event.Message{V: 1, Seq: time.Now().UnixMilli(), Ts: time.Now().UnixMilli()}
 	switch input.Kind {
 	case "mouse_move":
 		base.Type = event.TypeMouseMove
 		base.Payload = event.MouseMovePayload{DX: input.DX, DY: input.DY, Button: input.Button}
+		return []event.Message{base}, nil
 	case "mouse_button":
 		base.Type = event.TypeMouseButton
 		base.Payload = event.MouseButtonPayload{Button: input.Button, Pressed: input.Pressed}
+		return []event.Message{base}, nil
 	case "key_down":
 		base.Type = event.TypeKeyDown
 		base.Payload = event.KeyDownPayload{Code: int(input.KeyCode), Mods: int(input.Modifiers)}
+		return []event.Message{base}, nil
 	case "key_up":
 		base.Type = event.TypeKeyUp
 		base.Payload = event.KeyUpPayload{Code: int(input.KeyCode), Mods: int(input.Modifiers)}
+		return []event.Message{base}, nil
 	case "key_tap":
 		base.Type = event.TypeKeyDown
 		base.Payload = event.KeyDownPayload{Code: int(input.KeyCode), Mods: int(input.Modifiers)}
+		up := event.Message{
+			V:       1,
+			Seq:     time.Now().UnixMilli() + 1,
+			Ts:      time.Now().UnixMilli(),
+			Type:    event.TypeKeyUp,
+			Payload: event.KeyUpPayload{Code: int(input.KeyCode), Mods: int(input.Modifiers)},
+		}
+		return []event.Message{base, up}, nil
+	case "text":
+		base.Type = event.TypeText
+		base.Payload = event.TextPayload{Text: input.Text}
+		return []event.Message{base}, nil
 	case "scroll":
 		base.Type = event.TypeScroll
 		base.Payload = event.ScrollPayload{DX: input.DX, DY: input.DY}
+		return []event.Message{base}, nil
 	default:
-		return event.Message{}, fmt.Errorf("unsupported session input kind %q", input.Kind)
+		return nil, fmt.Errorf("unsupported session input kind %q", input.Kind)
 	}
-	return base, nil
 }
 
 func (d *Daemon) Paused() bool {
