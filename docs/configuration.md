@@ -11,7 +11,7 @@
   "hotkeys": {
     "switch_next":    "ctrl+alt+right",
     "switch_prev":    "ctrl+alt+left",
-    "switch_to_host": "",
+    "switch_to_host": "ctrl+alt+escape",
     "disconnect_all": "",
     "toggle_pause":   ""
   }
@@ -27,7 +27,7 @@
 | `device_name` | string | 主机名 | 本机在对端日志和 UI 中显示的名称 |
 | `hotkeys.switch_next` | string | `""` | 切换到下一台设备的快捷键（helper 实现后生效） |
 | `hotkeys.switch_prev` | string | `""` | 切换到上一台设备的快捷键 |
-| `hotkeys.switch_to_host` | string | `""` | 切换回主机的快捷键 |
+| `hotkeys.switch_to_host` | string | `ctrl+alt+escape` | 切换回主机的快捷键，建议保留为随手可按的紧急返回键 |
 | `hotkeys.disconnect_all` | string | `""` | 断开所有连接的快捷键 |
 | `hotkeys.toggle_pause` | string | `""` | 暂停/恢复输入转发的快捷键 |
 

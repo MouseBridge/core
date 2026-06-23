@@ -51,6 +51,38 @@ curl http://127.0.0.1:39172/api/status
 curl -N http://127.0.0.1:39172/api/events    # SSE 事件流
 ```
 
+## 本机双端验证（macOS）
+
+仓库根目录提供了一个本地双端验证脚本：
+
+```bash
+./verify/local-two-node-macos.sh start
+```
+
+它会在本机拉起：
+
+- `A`：接收端 daemon，监听 `127.0.0.1:39272`
+- `B`：发送端 daemon，监听 `127.0.0.1:39273`
+- 两个 helper：都在 `iTerm` 中启动，便于使用 macOS Accessibility / event tap
+
+验证时可直接操作本机键鼠：
+
+- `ctrl+alt+down`：把控制切到接收端 `A`
+- `ctrl+alt+escape`：切回本地发送端 `B`
+- 鼠标移到本地右边缘：若 `edge_targets.right` 已配置，也会切到 `A`
+
+查看日志：
+
+```bash
+./verify/local-two-node-macos.sh logs
+```
+
+停止验证环境：
+
+```bash
+./verify/local-two-node-macos.sh stop
+```
+
 ---
 
 ## 构建

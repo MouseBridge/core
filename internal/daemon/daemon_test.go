@@ -1,8 +1,10 @@
 package daemon_test
 
 import (
+	"path/filepath"
 	"testing"
 
+	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/daemon"
 )
 
@@ -36,5 +38,38 @@ func TestDaemonSubscribeBroadcast(t *testing.T) {
 	snap := d.State()
 	if snap.Daemon.DeviceID == "" {
 		t.Fatal("expected non-empty device_id")
+	}
+}
+
+func TestUpdateHotkeysPersistsConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.Default()
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	d, err := daemon.New(daemon.Options{DataDir: dir, ConfigPath: configPath})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	err = d.UpdateHotkeys(config.Hotkeys{
+		SwitchNext:    "ctrl+1",
+		SwitchPrev:    "ctrl+2",
+		SwitchToHost:  "ctrl+3",
+		DisconnectAll: "ctrl+4",
+		TogglePause:   "ctrl+5",
+	})
+	if err != nil {
+		t.Fatalf("UpdateHotkeys: %v", err)
+	}
+
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Hotkeys.TogglePause != "ctrl+5" {
+		t.Fatalf("toggle_pause=%q want ctrl+5", loaded.Hotkeys.TogglePause)
 	}
 }

@@ -5,6 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/mousebridge/core/internal/config"
+	"github.com/mousebridge/core/internal/helper"
 	"github.com/mousebridge/core/internal/validate"
 )
 
@@ -99,6 +101,65 @@ func (s *Server) handleRememberedRename(c *gin.Context) {
 	}
 	if err := s.d.RememberedRename(deviceID, req.Alias); err != nil {
 		c.JSON(http.StatusNotFound, apiErr("not_found", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleShortcutsGet(c *gin.Context) {
+	c.JSON(http.StatusOK, s.d.Config().Hotkeys)
+}
+
+func (s *Server) handleShortcutsPut(c *gin.Context) {
+	var req config.Hotkeys
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+	if err := s.d.UpdateHotkeys(req); err != nil {
+		c.JSON(http.StatusInternalServerError, apiErr("internal_error", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleHelperInput(c *gin.Context) {
+	var req helper.InputPayload
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+
+	switch req.Kind {
+	case "mouse_move", "scroll", "key_tap":
+	default:
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "kind must be mouse_move, scroll, or key_tap"))
+		return
+	}
+
+	s.d.PushHelperInput(req)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleSessionInput(c *gin.Context) {
+	var req struct {
+		DeviceID string `json:"device_id"`
+		helper.InputPayload
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+
+	switch req.Kind {
+	case "mouse_move", "mouse_button", "key_down", "key_up", "scroll":
+	default:
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "kind must be mouse_move, mouse_button, key_down, key_up, or scroll"))
+		return
+	}
+
+	if err := s.d.SendSessionInput(req.DeviceID, req.InputPayload); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("not_found", err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})

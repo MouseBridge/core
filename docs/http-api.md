@@ -76,7 +76,7 @@ daemon 启动并开始监听后，HTTP API 与 P2P 流量共用同一 TCP 端口
 {
   "switch_next":      "ctrl+alt+right",
   "switch_prev":      "ctrl+alt+left",
-  "switch_to_host":   "",
+  "switch_to_host":   "ctrl+alt+escape",
   "disconnect_all":   "",
   "toggle_pause":     ""
 }

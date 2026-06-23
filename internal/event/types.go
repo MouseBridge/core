@@ -85,6 +85,7 @@ type PongPayload struct {
 type MouseMovePayload struct {
 	DX      float64 `json:"dx"`
 	DY      float64 `json:"dy"`
+	Button  string  `json:"button,omitempty"`
 	AbsX    float64 `json:"abs_x"`
 	AbsY    float64 `json:"abs_y"`
 	ScreenW int     `json:"screen_w"`

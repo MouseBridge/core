@@ -14,9 +14,9 @@ import (
 
 // Config holds all daemon settings matching v1.5.2-final-mvp spec.
 type Config struct {
-	ListenHost   string `json:"listen_host"`
-	Port         int    `json:"port"`
-	UnsafeHTTPLAN bool  `json:"unsafe_http_lan"`
+	ListenHost    string `json:"listen_host"`
+	Port          int    `json:"port"`
+	UnsafeHTTPLAN bool   `json:"unsafe_http_lan"`
 
 	RememberedEnabled            bool `json:"remembered_enabled"`
 	RememberedAutoConnectEnabled bool `json:"remembered_auto_connect_enabled"`
@@ -24,11 +24,30 @@ type Config struct {
 	PairingPINTTLSeconds  int `json:"pairing_pin_ttl_seconds"`
 	PairingPINMaxAttempts int `json:"pairing_pin_max_attempts"`
 
-	ConnectTimeoutSeconds int   `json:"connect_timeout_seconds"`
-	JSONBodyLimitBytes    int64 `json:"json_body_limit_bytes"`
+	ConnectTimeoutSeconds int         `json:"connect_timeout_seconds"`
+	JSONBodyLimitBytes    int64       `json:"json_body_limit_bytes"`
+	Hotkeys               Hotkeys     `json:"hotkeys"`
+	EdgeTargets           EdgeTargets `json:"edge_targets"`
 
 	// DeviceName is user-configurable; DeviceID is always derived, never stored.
 	DeviceName string `json:"device_name,omitempty"`
+}
+
+// Hotkeys holds configurable key bindings.
+type Hotkeys struct {
+	SwitchNext    string `json:"switch_next"`
+	SwitchPrev    string `json:"switch_prev"`
+	SwitchToHost  string `json:"switch_to_host"`
+	DisconnectAll string `json:"disconnect_all"`
+	TogglePause   string `json:"toggle_pause"`
+}
+
+// EdgeTargets maps local screen edges to remembered/connected remote device IDs.
+type EdgeTargets struct {
+	Left   string `json:"left"`
+	Right  string `json:"right"`
+	Top    string `json:"top"`
+	Bottom string `json:"bottom"`
 }
 
 // Default returns a Config with sensible defaults.
@@ -42,7 +61,12 @@ func Default() *Config {
 		PairingPINMaxAttempts: 3,
 		ConnectTimeoutSeconds: 5,
 		JSONBodyLimitBytes:    65536,
-		DeviceName:            hostname(),
+		Hotkeys: Hotkeys{
+			SwitchNext:   "ctrl+alt+right",
+			SwitchPrev:   "ctrl+alt+left",
+			SwitchToHost: "ctrl+alt+escape",
+		},
+		DeviceName: hostname(),
 	}
 }
 

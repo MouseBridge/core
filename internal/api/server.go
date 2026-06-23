@@ -66,6 +66,10 @@ func (s *Server) routes(r *gin.Engine) {
 	api.GET("/remembered", s.handleRememberedList)
 	api.DELETE("/remembered/:device_id", s.handleRememberedDelete)
 	api.PATCH("/remembered/:device_id", s.handleRememberedRename)
+	api.GET("/shortcuts", s.handleShortcutsGet)
+	api.PUT("/shortcuts", s.handleShortcutsPut)
+	api.POST("/helper/input", s.handleHelperInput)
+	api.POST("/session/input", s.handleSessionInput)
 }
 
 func (s *Server) fanOutEvents() {

@@ -7,6 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/mousebridge/core/internal/event"
+	"github.com/mousebridge/core/internal/helper"
 	"github.com/mousebridge/core/internal/remembered"
 	"github.com/mousebridge/core/internal/transport"
 )
@@ -18,6 +19,7 @@ type SessionHost interface {
 	SessionAdd(connectionID, deviceID, name, ip, role string)
 	SessionRemove(connectionID string)
 	SessionRecordLatency(connectionID string, ms float64)
+	PushHelperInput(input helper.InputPayload)
 }
 
 // RunSession runs the message loop for an authenticated session.
@@ -45,6 +47,57 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 		h.SessionRecordLatency(connID, latency)
 
 		switch msg.Type {
+		case event.TypeMouseMove:
+			var pay event.MouseMovePayload
+			_ = event.DecodePayload(msg, &pay)
+			h.PushHelperInput(helper.InputPayload{
+				Kind:   "mouse_move",
+				DX:     pay.DX,
+				DY:     pay.DY,
+				Button: pay.Button,
+			})
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv mouse_move dx=%.1f dy=%.1f button=%s latency=%.1fms", pay.DX, pay.DY, pay.Button, latency)})
+
+		case event.TypeMouseButton:
+			var pay event.MouseButtonPayload
+			_ = event.DecodePayload(msg, &pay)
+			h.PushHelperInput(helper.InputPayload{
+				Kind:    "mouse_button",
+				Button:  pay.Button,
+				Pressed: pay.Pressed,
+			})
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv mouse_button button=%s pressed=%t latency=%.1fms", pay.Button, pay.Pressed, latency)})
+
+		case event.TypeKeyDown:
+			var pay event.KeyDownPayload
+			_ = event.DecodePayload(msg, &pay)
+			h.PushHelperInput(helper.InputPayload{
+				Kind:      "key_down",
+				KeyCode:   int64(pay.Code),
+				Modifiers: int64(pay.Mods),
+			})
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv key_down code=%d mods=%d latency=%.1fms", pay.Code, pay.Mods, latency)})
+
+		case event.TypeKeyUp:
+			var pay event.KeyUpPayload
+			_ = event.DecodePayload(msg, &pay)
+			h.PushHelperInput(helper.InputPayload{
+				Kind:      "key_up",
+				KeyCode:   int64(pay.Code),
+				Modifiers: int64(pay.Mods),
+			})
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv key_up code=%d mods=%d latency=%.1fms", pay.Code, pay.Mods, latency)})
+
+		case event.TypeScroll:
+			var pay event.ScrollPayload
+			_ = event.DecodePayload(msg, &pay)
+			h.PushHelperInput(helper.InputPayload{
+				Kind: "scroll",
+				DX:   pay.DX,
+				DY:   pay.DY,
+			})
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv scroll dx=%.1f dy=%.1f latency=%.1fms", pay.DX, pay.DY, latency)})
+
 		case event.TypePing:
 			_ = c.Send(event.Message{
 				V: 1, Seq: seq, Type: event.TypePong, Ts: time.Now().UnixMilli(),
