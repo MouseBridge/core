@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -11,6 +12,14 @@ import (
 	"github.com/mousebridge/core/internal/remembered"
 	"github.com/mousebridge/core/internal/transport"
 )
+
+var verboseSessionInputLogs = os.Getenv("MB_VERBOSE_INPUT_LOGS") == "1"
+
+func emitVerboseSessionLog(emit func(BusEvent), msg string) {
+	if verboseSessionInputLogs {
+		emit(BusEvent{Kind: "log", Msg: msg})
+	}
+}
 
 // SessionHost is the subset of daemon that active sessions need.
 type SessionHost interface {
@@ -56,7 +65,7 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 				DY:     pay.DY,
 				Button: pay.Button,
 			})
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv mouse_move dx=%.1f dy=%.1f button=%s latency=%.1fms", pay.DX, pay.DY, pay.Button, latency)})
+			emitVerboseSessionLog(emit, fmt.Sprintf("recv mouse_move dx=%.1f dy=%.1f button=%s latency=%.1fms", pay.DX, pay.DY, pay.Button, latency))
 
 		case event.TypeMouseButton:
 			var pay event.MouseButtonPayload
@@ -66,7 +75,7 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 				Button:  pay.Button,
 				Pressed: pay.Pressed,
 			})
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv mouse_button button=%s pressed=%t latency=%.1fms", pay.Button, pay.Pressed, latency)})
+			emitVerboseSessionLog(emit, fmt.Sprintf("recv mouse_button button=%s pressed=%t latency=%.1fms", pay.Button, pay.Pressed, latency))
 
 		case event.TypeKeyDown:
 			var pay event.KeyDownPayload
@@ -76,7 +85,7 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 				KeyCode:   int64(pay.Code),
 				Modifiers: int64(pay.Mods),
 			})
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv key_down code=%d mods=%d latency=%.1fms", pay.Code, pay.Mods, latency)})
+			emitVerboseSessionLog(emit, fmt.Sprintf("recv key_down code=%d mods=%d latency=%.1fms", pay.Code, pay.Mods, latency))
 
 		case event.TypeKeyUp:
 			var pay event.KeyUpPayload
@@ -86,7 +95,7 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 				KeyCode:   int64(pay.Code),
 				Modifiers: int64(pay.Mods),
 			})
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv key_up code=%d mods=%d latency=%.1fms", pay.Code, pay.Mods, latency)})
+			emitVerboseSessionLog(emit, fmt.Sprintf("recv key_up code=%d mods=%d latency=%.1fms", pay.Code, pay.Mods, latency))
 
 		case event.TypeScroll:
 			var pay event.ScrollPayload
@@ -96,7 +105,7 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 				DX:   pay.DX,
 				DY:   pay.DY,
 			})
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv scroll dx=%.1f dy=%.1f latency=%.1fms", pay.DX, pay.DY, latency)})
+			emitVerboseSessionLog(emit, fmt.Sprintf("recv scroll dx=%.1f dy=%.1f latency=%.1fms", pay.DX, pay.DY, latency))
 
 		case event.TypePing:
 			_ = c.Send(event.Message{
@@ -104,14 +113,14 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 				Payload: event.PongPayload{EchoTs: msg.Ts},
 			})
 			seq++
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("ping latency=%.1fms", latency)})
+			emitVerboseSessionLog(emit, fmt.Sprintf("ping latency=%.1fms", latency))
 
 		case event.TypePong:
 			var pay event.PongPayload
 			_ = event.DecodePayload(msg, &pay)
 			rtt := float64(time.Now().UnixMilli() - pay.EchoTs)
 			h.SessionRecordLatency(connID, rtt)
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("pong rtt=%.1fms", rtt)})
+			emitVerboseSessionLog(emit, fmt.Sprintf("pong rtt=%.1fms", rtt))
 
 		case event.TypeSwitchRequest:
 			var pay event.SwitchRequestPayload
@@ -125,7 +134,7 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_ack from %s latency=%.1fms", name, latency)})
 
 		default:
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("recv %s latency=%.1fms", msg.Type, latency)})
+			emitVerboseSessionLog(emit, fmt.Sprintf("recv %s latency=%.1fms", msg.Type, latency))
 		}
 	}
 }

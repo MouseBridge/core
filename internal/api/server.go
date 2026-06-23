@@ -61,6 +61,7 @@ func (s *Server) routes(r *gin.Engine) {
 	api.GET("/status", s.handleStatus)
 	api.GET("/events", s.handleSSE)
 	api.POST("/connect", s.handleConnect)
+	api.DELETE("/sessions/:device_id", s.handleSessionDelete)
 	api.POST("/pair/pin", s.handlePairPIN)
 	api.POST("/pair/reject", s.handlePairReject)
 	api.GET("/remembered", s.handleRememberedList)

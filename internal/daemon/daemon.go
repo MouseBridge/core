@@ -287,6 +287,23 @@ func (d *Daemon) closeConnByDeviceID(deviceID string) {
 	}
 }
 
+// DisconnectDevice closes the active connection for the given remote device.
+func (d *Daemon) DisconnectDevice(deviceID string) error {
+	d.connsMu.Lock()
+	var target *transport.Conn
+	for c, id := range d.conns {
+		if id == deviceID {
+			target = c
+			break
+		}
+	}
+	d.connsMu.Unlock()
+	if target == nil {
+		return fmt.Errorf("no active session for device %q", deviceID)
+	}
+	return target.Close()
+}
+
 // Connect dials a remote daemon and starts the client-side pairing flow.
 func (d *Daemon) Connect(host string, port int) {
 	go func() {

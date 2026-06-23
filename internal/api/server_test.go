@@ -183,3 +183,17 @@ func TestSessionInputEndpointWithoutSession(t *testing.T) {
 		t.Fatalf("want 400, got %d", resp.StatusCode)
 	}
 }
+
+func TestSessionDeleteWithoutSession(t *testing.T) {
+	_, _, addr := newTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodDelete, "http://"+addr+"/api/sessions/1234567890abcdef1234567890abcdef", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", resp.StatusCode)
+	}
+}

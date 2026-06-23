@@ -35,6 +35,19 @@ func (s *Server) handleConnect(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"ok": true})
 }
 
+func (s *Server) handleSessionDelete(c *gin.Context) {
+	deviceID := c.Param("device_id")
+	if err := validate.DeviceID(deviceID); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
+		return
+	}
+	if err := s.d.DisconnectDevice(deviceID); err != nil {
+		c.JSON(http.StatusNotFound, apiErr("not_found", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (s *Server) handlePairPIN(c *gin.Context) {
 	var req struct {
 		PairingID string `json:"pairing_id"`
