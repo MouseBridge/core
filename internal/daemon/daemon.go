@@ -657,7 +657,14 @@ func (d *Daemon) Paused() bool {
 	return d.paused
 }
 
-func (d *Daemon) togglePause() {
+func (d *Daemon) SwitchToHost() {
+	d.ctrl.SwitchBack()
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+}
+
+func (d *Daemon) TogglePause() bool {
 	d.pausedMu.Lock()
 	d.paused = !d.paused
 	paused := d.paused
@@ -666,6 +673,15 @@ func (d *Daemon) togglePause() {
 	if d.helper != nil {
 		d.helper.BroadcastConfig()
 	}
+	return paused
+}
+
+func (d *Daemon) DisconnectAll() {
+	d.disconnectAll()
+}
+
+func (d *Daemon) togglePause() {
+	d.TogglePause()
 }
 
 func (d *Daemon) disconnectAll() {

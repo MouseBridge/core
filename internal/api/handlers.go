@@ -166,6 +166,26 @@ func (s *Server) handleShortcutsPut(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func (s *Server) handleControlSwitchToHost(c *gin.Context) {
+	s.d.SwitchToHost()
+	state := s.d.State()
+	c.JSON(http.StatusOK, gin.H{
+		"ok":                      true,
+		"active_target_device_id": state.ActiveTargetID,
+		"controlling_remote":      state.ControllingRemote,
+	})
+}
+
+func (s *Server) handleControlDisconnectAll(c *gin.Context) {
+	s.d.DisconnectAll()
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleControlTogglePause(c *gin.Context) {
+	paused := s.d.TogglePause()
+	c.JSON(http.StatusOK, gin.H{"ok": true, "paused": paused})
+}
+
 func (s *Server) handleHelperInput(c *gin.Context) {
 	var req helper.InputPayload
 	if err := c.ShouldBindJSON(&req); err != nil {

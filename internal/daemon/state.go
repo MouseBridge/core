@@ -44,6 +44,9 @@ type StatusSnapshot struct {
 	PendingPairs      []PendingPairStatus `json:"pending_pairs"`
 	RememberedDevices []remembered.DTO    `json:"remembered_devices"`
 	HelperRuntime     localhelper.Status  `json:"helper_runtime"`
+	ActiveTargetID    string              `json:"active_target_device_id"`
+	ControllingRemote bool                `json:"controlling_remote"`
+	Paused            bool                `json:"paused"`
 	UnsafeHTTPLAN     bool                `json:"unsafe_http_lan"`
 }
 
@@ -95,6 +98,8 @@ func (d *Daemon) State() StatusSnapshot {
 	}
 
 	addr := d.Addr()
+	activeTarget := d.ctrl.ActiveTarget()
+	paused := d.Paused()
 
 	return StatusSnapshot{
 		Daemon: DaemonInfo{
@@ -108,6 +113,9 @@ func (d *Daemon) State() StatusSnapshot {
 		PendingPairs:      pendingStatuses,
 		RememberedDevices: d.rem.List(),
 		HelperRuntime:     d.LocalHelperStatus(),
+		ActiveTargetID:    activeTarget,
+		ControllingRemote: activeTarget != "" && activeTarget != id.DeviceID,
+		Paused:            paused,
 		UnsafeHTTPLAN:     d.cfg.UnsafeHTTPLAN,
 	}
 }

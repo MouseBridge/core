@@ -60,6 +60,15 @@ func TestStatus(t *testing.T) {
 	if _, ok := result["helper_runtime"]; !ok {
 		t.Fatal("missing 'helper_runtime' field in status response")
 	}
+	if _, ok := result["active_target_device_id"]; !ok {
+		t.Fatal("missing 'active_target_device_id' field in status response")
+	}
+	if _, ok := result["controlling_remote"]; !ok {
+		t.Fatal("missing 'controlling_remote' field in status response")
+	}
+	if _, ok := result["paused"]; !ok {
+		t.Fatal("missing 'paused' field in status response")
+	}
 }
 
 func TestLocalHelperStatus(t *testing.T) {
@@ -207,6 +216,40 @@ func TestPutShortcuts(t *testing.T) {
 	}
 	if d.Config().Hotkeys.TogglePause != "ctrl+5" {
 		t.Fatalf("toggle_pause=%q want ctrl+5", d.Config().Hotkeys.TogglePause)
+	}
+}
+
+func TestControlTogglePause(t *testing.T) {
+	_, d, addr := newTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/control/toggle-pause", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if !d.Paused() {
+		t.Fatal("daemon should be paused after control toggle")
+	}
+}
+
+func TestControlSwitchToHost(t *testing.T) {
+	_, d, addr := newTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/control/switch-to-host", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if got := d.State().ActiveTargetID; got != d.State().Daemon.DeviceID {
+		t.Fatalf("active_target_device_id=%q want local %q", got, d.State().Daemon.DeviceID)
 	}
 }
 
