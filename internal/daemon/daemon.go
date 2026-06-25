@@ -46,8 +46,10 @@ type Daemon struct {
 	localHelper *localhelper.Runtime
 	ctrl        *switch_.Controller
 
-	pausedMu sync.RWMutex
-	paused   bool
+	pausedMu       sync.RWMutex
+	paused         bool
+	captureMu      sync.RWMutex
+	captureEnabled bool
 
 	sessMu   sync.RWMutex
 	sessions map[string]*sessionEntry // keyed by connectionID
@@ -109,17 +111,18 @@ func New(opts Options) (*Daemon, error) {
 	pm := pending.New(ttl, cfg.PairingPINMaxAttempts)
 
 	d := &Daemon{
-		configPath: opts.ConfigPath,
-		dataDir:    opts.DataDir,
-		cfg:        cfg,
-		identity:   identity,
-		rem:        rem,
-		pending:    pm,
-		tracker:    p2p.NewOutboundTracker(),
-		sessions:   make(map[string]*sessionEntry),
-		conns:      make(map[*transport.Conn]string),
-		subs:       make(map[chan BusEvent]struct{}),
-		httpConnCh: make(chan net.Conn, 64),
+		configPath:     opts.ConfigPath,
+		dataDir:        opts.DataDir,
+		cfg:            cfg,
+		identity:       identity,
+		rem:            rem,
+		pending:        pm,
+		tracker:        p2p.NewOutboundTracker(),
+		sessions:       make(map[string]*sessionEntry),
+		conns:          make(map[*transport.Conn]string),
+		subs:           make(map[chan BusEvent]struct{}),
+		httpConnCh:     make(chan net.Conn, 64),
+		captureEnabled: true,
 	}
 	d.ctrl = switch_.NewController(identity.DeviceID)
 	d.ctrl.OnSwitch = d.handleSwitchEvent
@@ -512,8 +515,9 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 			"top":    d.cfg.EdgeTargets.Top,
 			"bottom": d.cfg.EdgeTargets.Bottom,
 		},
-		ActiveTarget: d.ctrl.ActiveTarget(),
-		Paused:       d.Paused(),
+		ActiveTarget:   d.ctrl.ActiveTarget(),
+		Paused:         d.Paused(),
+		CaptureEnabled: d.CaptureEnabled(),
 	}
 }
 
@@ -603,7 +607,11 @@ func (d *Daemon) SendSessionInput(deviceID string, input helper.InputPayload) er
 }
 
 func helperSocketPath(dataDir string, port int) string {
-	sum := sha256.Sum256([]byte(dataDir))
+	canonical := dataDir
+	if abs, err := filepath.Abs(dataDir); err == nil {
+		canonical = filepath.Clean(abs)
+	}
+	sum := sha256.Sum256([]byte(canonical))
 	suffix := hex.EncodeToString(sum[:4])
 	return filepath.Join(os.TempDir(), fmt.Sprintf("mb-helper-%d-%s.sock", port, suffix))
 }
@@ -657,6 +665,12 @@ func (d *Daemon) Paused() bool {
 	return d.paused
 }
 
+func (d *Daemon) CaptureEnabled() bool {
+	d.captureMu.RLock()
+	defer d.captureMu.RUnlock()
+	return d.captureEnabled
+}
+
 func (d *Daemon) SwitchToHost() {
 	d.ctrl.SwitchBack()
 	if d.helper != nil {
@@ -678,6 +692,20 @@ func (d *Daemon) TogglePause() bool {
 
 func (d *Daemon) DisconnectAll() {
 	d.disconnectAll()
+}
+
+func (d *Daemon) SetCaptureEnabled(enabled bool) bool {
+	d.captureMu.Lock()
+	changed := d.captureEnabled != enabled
+	d.captureEnabled = enabled
+	d.captureMu.Unlock()
+	if changed {
+		d.broadcast(BusEvent{Kind: "log", Msg: fmt.Sprintf("helper capture enabled=%t", enabled)})
+		if d.helper != nil {
+			d.helper.BroadcastConfig()
+		}
+	}
+	return enabled
 }
 
 func (d *Daemon) togglePause() {

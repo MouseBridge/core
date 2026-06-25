@@ -47,6 +47,7 @@ type StatusSnapshot struct {
 	ActiveTargetID    string              `json:"active_target_device_id"`
 	ControllingRemote bool                `json:"controlling_remote"`
 	Paused            bool                `json:"paused"`
+	CaptureEnabled    bool                `json:"capture_enabled"`
 	UnsafeHTTPLAN     bool                `json:"unsafe_http_lan"`
 }
 
@@ -100,6 +101,7 @@ func (d *Daemon) State() StatusSnapshot {
 	addr := d.Addr()
 	activeTarget := d.ctrl.ActiveTarget()
 	paused := d.Paused()
+	captureEnabled := d.CaptureEnabled()
 
 	return StatusSnapshot{
 		Daemon: DaemonInfo{
@@ -116,6 +118,7 @@ func (d *Daemon) State() StatusSnapshot {
 		ActiveTargetID:    activeTarget,
 		ControllingRemote: activeTarget != "" && activeTarget != id.DeviceID,
 		Paused:            paused,
+		CaptureEnabled:    captureEnabled,
 		UnsafeHTTPLAN:     d.cfg.UnsafeHTTPLAN,
 	}
 }

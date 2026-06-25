@@ -44,6 +44,9 @@ type Runtime struct {
 
 // NewRuntime creates a Runtime bound to one daemon data dir.
 func NewRuntime(dataDir string, clientCountFn func() int) *Runtime {
+	if abs, err := filepath.Abs(dataDir); err == nil {
+		dataDir = filepath.Clean(abs)
+	}
 	return &Runtime{
 		dataDir:       dataDir,
 		clientCountFn: clientCountFn,
@@ -203,6 +206,9 @@ func run(program string, args ...string) (string, error) {
 }
 
 func defaultLaunchAgentLabel(dataDir string) string {
+	if abs, err := filepath.Abs(dataDir); err == nil {
+		dataDir = filepath.Clean(abs)
+	}
 	sum := sha256.Sum256([]byte(dataDir))
 	return "com.mousebridge.helper." + hex.EncodeToString(sum[:4])
 }

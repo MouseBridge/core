@@ -100,6 +100,7 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 | `POST` | `/api/control/switch-to-host` | — | 立即切回本机控制 |
 | `POST` | `/api/control/disconnect-all` | — | 断开全部会话并停留在本机 |
 | `POST` | `/api/control/toggle-pause` | — | 暂停/恢复输入转发 |
+| `PUT` | `/api/control/capture` | `{"enabled":false}` | 开启/关闭本机 helper 捕获；关闭后保留注入能力，适合本机双端模拟 |
 
 请求体：
 
@@ -118,6 +119,7 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 - `active_target_device_id`：当前控制目标设备 ID
 - `controlling_remote`：当前是否处于远端控制态
 - `paused`：当前是否暂停输入转发
+- `capture_enabled`：当前本机 helper 是否采集本机键鼠事件
 
 ## 调试输入接口
 

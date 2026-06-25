@@ -69,6 +69,9 @@ func TestStatus(t *testing.T) {
 	if _, ok := result["paused"]; !ok {
 		t.Fatal("missing 'paused' field in status response")
 	}
+	if _, ok := result["capture_enabled"]; !ok {
+		t.Fatal("missing 'capture_enabled' field in status response")
+	}
 }
 
 func TestLocalHelperStatus(t *testing.T) {
@@ -250,6 +253,25 @@ func TestControlSwitchToHost(t *testing.T) {
 	}
 	if got := d.State().ActiveTargetID; got != d.State().Daemon.DeviceID {
 		t.Fatalf("active_target_device_id=%q want local %q", got, d.State().Daemon.DeviceID)
+	}
+}
+
+func TestControlCapturePut(t *testing.T) {
+	_, d, addr := newTestServer(t)
+
+	body := bytes.NewBufferString(`{"enabled":false}`)
+	req, _ := http.NewRequest(http.MethodPut, "http://"+addr+"/api/control/capture", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if d.CaptureEnabled() {
+		t.Fatal("capture should be disabled after control request")
 	}
 }
 

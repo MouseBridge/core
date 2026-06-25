@@ -31,12 +31,13 @@ type RegisterPayload struct {
 // ConfigPushPayload is the daemon snapshot sent immediately after helper register
 // and again whenever daemon-side state changes.
 type ConfigPushPayload struct {
-	Daemon       DaemonInfo        `json:"daemon"`
-	Sessions     []SessionInfo     `json:"sessions"`
-	Hotkeys      map[string]string `json:"hotkeys"`
-	EdgeTargets  map[string]string `json:"edge_targets"`
-	ActiveTarget string            `json:"active_target"`
-	Paused       bool              `json:"paused"`
+	Daemon         DaemonInfo        `json:"daemon"`
+	Sessions       []SessionInfo     `json:"sessions"`
+	Hotkeys        map[string]string `json:"hotkeys"`
+	EdgeTargets    map[string]string `json:"edge_targets"`
+	ActiveTarget   string            `json:"active_target"`
+	Paused         bool              `json:"paused"`
+	CaptureEnabled bool              `json:"capture_enabled"`
 }
 
 // DaemonInfo identifies the local daemon the helper is attached to.

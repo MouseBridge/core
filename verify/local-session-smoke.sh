@@ -25,6 +25,46 @@ CONTROLLER_URL="${1%/}"
 RECEIVER_URL="${2%/}"
 TEXT="${3:-MouseBridge local smoke}"
 
+restore_controller_capture="true"
+restore_receiver_capture="true"
+
+set_capture_state() {
+  local base_url="$1"
+  local enabled="$2"
+  curl -fsS -X PUT "$base_url/api/control/capture" \
+    -H 'Content-Type: application/json' \
+    -d "{\"enabled\":$enabled}" >/dev/null
+}
+
+wait_for_capture_state() {
+  local base_url="$1"
+  local expected="$2"
+  for _ in {1..25}; do
+    local actual
+    actual="$(json_get "$base_url/api/status" | extract_capture_enabled)"
+    if [[ "$actual" == "$expected" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "timed out waiting for capture_enabled=$expected at $base_url" >&2
+  return 1
+}
+
+restore_capture_best_effort() {
+  set_capture_state "$CONTROLLER_URL" "$restore_controller_capture" >/dev/null 2>&1 || true
+  set_capture_state "$RECEIVER_URL" "$restore_receiver_capture" >/dev/null 2>&1 || true
+}
+
+restore_capture() {
+  set_capture_state "$CONTROLLER_URL" "$restore_controller_capture"
+  set_capture_state "$RECEIVER_URL" "$restore_receiver_capture"
+  wait_for_capture_state "$CONTROLLER_URL" "$restore_controller_capture"
+  wait_for_capture_state "$RECEIVER_URL" "$restore_receiver_capture"
+}
+
+trap restore_capture_best_effort EXIT
+
 json_get() {
   local url="$1"
   curl -fsS "$url"
@@ -36,6 +76,10 @@ extract_pin() {
 
 extract_first_session_device_id() {
   sed -n 's/.*"sessions":\[[^]]*"device_id":"\([^"]*\)".*/\1/p'
+}
+
+extract_capture_enabled() {
+  sed -nE 's/.*"capture_enabled":(true|false).*/\1/p'
 }
 
 wait_for_pin() {
@@ -84,9 +128,23 @@ echo "[smoke] connecting controller -> receiver"
 receiver_hostport="${RECEIVER_URL#http://}"
 receiver_host="${receiver_hostport%:*}"
 receiver_port="${receiver_hostport##*:}"
-curl -fsS -X POST "$CONTROLLER_URL/api/connect" \
-  -H 'Content-Type: application/json' \
-  -d "{\"host\":\"$receiver_host\",\"port\":$receiver_port}" >/dev/null
+device_id="$(current_session_device_id "$CONTROLLER_URL")"
+if [[ -z "$device_id" ]]; then
+  curl -fsS -X POST "$CONTROLLER_URL/api/connect" \
+    -H 'Content-Type: application/json' \
+    -d "{\"host\":\"$receiver_host\",\"port\":$receiver_port}" >/dev/null
+else
+  echo "[smoke] session already active, skipping new connect"
+fi
+
+restore_controller_capture="$(json_get "$CONTROLLER_URL/api/status" | extract_capture_enabled)"
+restore_receiver_capture="$(json_get "$RECEIVER_URL/api/status" | extract_capture_enabled)"
+
+echo "[smoke] disabling local capture on both sides for deterministic local verification"
+set_capture_state "$CONTROLLER_URL" false
+set_capture_state "$RECEIVER_URL" false
+wait_for_capture_state "$CONTROLLER_URL" false
+wait_for_capture_state "$RECEIVER_URL" false
 
 device_id="$(current_session_device_id "$CONTROLLER_URL")"
 if [[ -z "$device_id" ]]; then
@@ -138,6 +196,10 @@ EOF
 curl -fsS -X POST "$CONTROLLER_URL/api/session/input/batch" \
   -H 'Content-Type: application/json' \
   -d "$payload"
+
+echo "[smoke] restoring capture state"
+restore_capture
+trap - EXIT
 
 echo
 echo "[smoke] complete"

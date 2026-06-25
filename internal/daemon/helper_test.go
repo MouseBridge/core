@@ -62,6 +62,9 @@ func TestHelperRegisterReceivesConfigPush(t *testing.T) {
 	if cfg.EdgeTargets["right"] != "" {
 		t.Fatalf("edge_targets.right=%q want empty", cfg.EdgeTargets["right"])
 	}
+	if !cfg.CaptureEnabled {
+		t.Fatal("capture_enabled should default true")
+	}
 }
 
 func TestHelperHotkeyProducesBusLogEvent(t *testing.T) {
