@@ -69,14 +69,16 @@ type EdgePayload struct {
 
 // InputPayload tells helpers to inject a local input event.
 type InputPayload struct {
-	Kind      string  `json:"kind"`
-	DX        float64 `json:"dx,omitempty"`
-	DY        float64 `json:"dy,omitempty"`
-	KeyCode   int64   `json:"key_code,omitempty"`
-	Modifiers int64   `json:"modifiers,omitempty"`
-	Text      string  `json:"text,omitempty"`
-	Button    string  `json:"button,omitempty"`
-	Pressed   bool    `json:"pressed,omitempty"`
+	Kind      string   `json:"kind"`
+	DX        float64  `json:"dx,omitempty"`
+	DY        float64  `json:"dy,omitempty"`
+	X         *float64 `json:"x,omitempty"`
+	Y         *float64 `json:"y,omitempty"`
+	KeyCode   int64    `json:"key_code,omitempty"`
+	Modifiers int64    `json:"modifiers,omitempty"`
+	Text      string   `json:"text,omitempty"`
+	Button    string   `json:"button,omitempty"`
+	Pressed   bool     `json:"pressed,omitempty"`
 }
 
 // AckPayload confirms a successful register.

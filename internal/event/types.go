@@ -16,6 +16,7 @@ const (
 	TypePing          = "ping"
 	TypePong          = "pong"
 	TypeMouseMove     = "mouse_move"
+	TypeMouseMoveAbs  = "mouse_move_abs"
 	TypeMouseButton   = "mouse_button"
 	TypeKeyDown       = "key_down"
 	TypeKeyUp         = "key_up"
@@ -93,6 +94,13 @@ type MouseMovePayload struct {
 	ScreenH int     `json:"screen_h"`
 	Edge    string  `json:"edge,omitempty"`
 	EdgePct float64 `json:"edge_pct,omitempty"`
+}
+
+// MouseMoveAbsPayload carries an absolute cursor target plus optional drag button context.
+type MouseMoveAbsPayload struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Button string  `json:"button,omitempty"`
 }
 
 // MouseButtonPayload carries button press/release.

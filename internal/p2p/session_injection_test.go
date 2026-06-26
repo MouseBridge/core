@@ -66,6 +66,49 @@ func TestRunSessionForwardsMouseMoveToHelper(t *testing.T) {
 	}
 }
 
+func TestRunSessionForwardsMouseMoveAbsToHelper(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	host := &fakeSessionHost{inputs: make(chan helper.InputPayload, 1)}
+
+	go RunSession(transport.NewConn(server), "1234567890abcdef1234567890abcdef", "Remote", "client", host, func(BusEvent) {})
+
+	msg := event.Message{
+		V:    1,
+		Seq:  1,
+		Type: event.TypeMouseMoveAbs,
+		Ts:   time.Now().UnixMilli(),
+		Payload: event.MouseMoveAbsPayload{
+			X:      640,
+			Y:      360,
+			Button: "left",
+		},
+	}
+	if err := transport.NewConn(client).Send(msg); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	select {
+	case input := <-host.inputs:
+		if input.Kind != "mouse_move_abs" {
+			t.Fatalf("kind=%q want mouse_move_abs", input.Kind)
+		}
+		if input.X == nil || input.Y == nil {
+			t.Fatal("expected absolute coordinates in forwarded helper input")
+		}
+		if *input.X != 640 || *input.Y != 360 {
+			t.Fatalf("x/y=(%v,%v) want (640,360)", *input.X, *input.Y)
+		}
+		if input.Button != "left" {
+			t.Fatalf("button=%q want left", input.Button)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for forwarded absolute helper input")
+	}
+}
+
 func TestRunSessionForwardsTextToHelper(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()

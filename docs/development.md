@@ -67,7 +67,7 @@ go test ./...
 
 - `latency-benchmark.sh`：周期采样 `/api/status` 中的 `avg_latency_ms`
 - `session-input-burst.sh`：通过 `/api/session/input/batch` 分块打突发输入，检查转发链路稳定性和接收端 mouse move coalescing 表现
-- `local-session-smoke.sh`：本机双端场景下自动连接/自动配对（若未 remembered），验证期间临时关闭两侧本机捕获，然后发送一段真实的 move + click + text 序列，验证接收端 helper 是否真的把动作注入到 macOS
+- `local-session-smoke.sh`：本机双端场景下自动连接/自动配对（若未 remembered），验证期间临时关闭两侧本机捕获，然后发送一段真实的 absolute move-to-point + click + text 序列，验证接收端 helper 是否真的把动作注入到 macOS
 - `local-loop-safety.sh`：本机双端场景下保持两侧 capture 开启，发送一段真实 remote inject，并检查控制端 helper 日志里没有新的 `sent input kind=` 回流事件，用来验证 anti-loop
 - `local-performance-benchmark.sh`：本机双端场景下自动建会话、临时关闭 capture、发送 batch burst、采样 `avg_latency_ms`，并解析 receiver helper 日志里的 injected/coalesced 计数，输出压缩比和延迟摘要
 - `local-validation-suite.sh`：单入口串联 smoke、anti-loop、performance benchmark。它会自动起本地两端 daemon/helper、准备 TextEdit、运行验证、打印总结并自行清理进程

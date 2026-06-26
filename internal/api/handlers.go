@@ -235,6 +235,10 @@ func (s *Server) handleHelperInput(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
 		return
 	}
+	if err := validateInputPayload(req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
+		return
+	}
 
 	s.d.PushHelperInput(req)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -273,6 +277,10 @@ func (s *Server) handleSessionInput(c *gin.Context) {
 	}
 
 	if err := validateSessionInputKind(req.Kind); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
+		return
+	}
+	if err := validateInputPayload(req.InputPayload); err != nil {
 		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
 		return
 	}
@@ -327,24 +335,37 @@ func validateBatch(inputs []helper.InputPayload, stepDelayMs int, helperOnly boo
 		if err != nil {
 			return err
 		}
+		if err := validateInputPayload(input); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateInputPayload(input helper.InputPayload) error {
+	switch input.Kind {
+	case "mouse_move_abs":
+		if input.X == nil || input.Y == nil {
+			return fmt.Errorf("mouse_move_abs requires x and y")
+		}
 	}
 	return nil
 }
 
 func validateHelperInputKind(kind string) error {
 	switch kind {
-	case "mouse_move", "mouse_button", "scroll", "key_tap", "key_down", "key_up", "text":
+	case "mouse_move", "mouse_move_abs", "mouse_button", "scroll", "key_tap", "key_down", "key_up", "text":
 		return nil
 	default:
-		return fmt.Errorf("kind must be mouse_move, mouse_button, scroll, key_tap, key_down, key_up, or text")
+		return fmt.Errorf("kind must be mouse_move, mouse_move_abs, mouse_button, scroll, key_tap, key_down, key_up, or text")
 	}
 }
 
 func validateSessionInputKind(kind string) error {
 	switch kind {
-	case "mouse_move", "mouse_button", "key_down", "key_up", "key_tap", "scroll", "text":
+	case "mouse_move", "mouse_move_abs", "mouse_button", "key_down", "key_up", "key_tap", "scroll", "text":
 		return nil
 	default:
-		return fmt.Errorf("kind must be mouse_move, mouse_button, key_down, key_up, key_tap, scroll, or text")
+		return fmt.Errorf("kind must be mouse_move, mouse_move_abs, mouse_button, key_down, key_up, key_tap, scroll, or text")
 	}
 }

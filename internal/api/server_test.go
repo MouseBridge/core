@@ -449,6 +449,38 @@ func TestHelperInputEndpoint(t *testing.T) {
 	}
 }
 
+func TestHelperInputEndpointAbsoluteMove(t *testing.T) {
+	_, _, addr := newTestServer(t)
+
+	body := bytes.NewBufferString(`{"kind":"mouse_move_abs","x":128,"y":96}`)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/helper/input", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestHelperInputEndpointAbsoluteMoveRequiresCoordinates(t *testing.T) {
+	_, _, addr := newTestServer(t)
+
+	body := bytes.NewBufferString(`{"kind":"mouse_move_abs","x":128}`)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/helper/input", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestHelperInputBatchEndpoint(t *testing.T) {
 	_, _, addr := newTestServer(t)
 

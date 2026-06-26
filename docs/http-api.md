@@ -163,9 +163,21 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 | `POST` | `/api/session/input` | `{"device_id":"...","kind":"mouse_move","dx":12,"dy":-4}` | 向指定远端会话发送输入 |
 | `POST` | `/api/session/input/batch` | `{"device_id":"...","inputs":[...],"step_delay_ms":35}` | 按顺序向指定远端会话发送一组输入 |
 
+绝对定位示例：
+
+```json
+{
+  "device_id": "0123456789abcdef0123456789abcdef",
+  "kind": "mouse_move_abs",
+  "x": 1280,
+  "y": 720
+}
+```
+
 `/api/helper/input` 支持：
 
 - `mouse_move`
+- `mouse_move_abs`
 - `mouse_button`
 - `scroll`
 - `key_tap`
@@ -176,6 +188,7 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 `/api/session/input` 支持：
 
 - `mouse_move`
+- `mouse_move_abs`
 - `mouse_button`
 - `key_down`
 - `key_up`

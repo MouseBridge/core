@@ -12,7 +12,7 @@ What it does:
   1. connects controller -> receiver
   2. auto-pairs using the receiver PIN
   3. finds the active remote session device_id
-  4. sends a scripted remote sequence: move, click, type text
+  4. sends a scripted remote sequence: move to an absolute point, click, type text
 
 Before running:
   - both daemons and both helpers must already be running
@@ -176,8 +176,6 @@ current_x="${location[1]}"
 current_y="${location[2]}"
 target_x=$(( current_x + 80 ))
 target_y=$(( current_y - 20 ))
-dx=$(( target_x - current_x ))
-dy=$(( target_y - current_y ))
 
 echo "[smoke] sending remote move/click/text sequence"
 payload=$(cat <<EOF
@@ -185,7 +183,7 @@ payload=$(cat <<EOF
   "device_id": "$device_id",
   "step_delay_ms": 35,
   "inputs": [
-    {"kind":"mouse_move","dx":$dx,"dy":$dy},
+    {"kind":"mouse_move_abs","x":$target_x,"y":$target_y},
     {"kind":"mouse_button","button":"left","pressed":true},
     {"kind":"mouse_button","button":"left","pressed":false},
     {"kind":"text","text":$(printf '%s' "$TEXT" | json_quote)}

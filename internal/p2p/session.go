@@ -67,6 +67,17 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			})
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv mouse_move dx=%.1f dy=%.1f button=%s latency=%.1fms", pay.DX, pay.DY, pay.Button, latency))
 
+		case event.TypeMouseMoveAbs:
+			var pay event.MouseMoveAbsPayload
+			_ = event.DecodePayload(msg, &pay)
+			h.PushHelperInput(helper.InputPayload{
+				Kind:   "mouse_move_abs",
+				X:      &pay.X,
+				Y:      &pay.Y,
+				Button: pay.Button,
+			})
+			emitVerboseSessionLog(emit, fmt.Sprintf("recv mouse_move_abs x=%.1f y=%.1f button=%s latency=%.1fms", pay.X, pay.Y, pay.Button, latency))
+
 		case event.TypeMouseButton:
 			var pay event.MouseButtonPayload
 			_ = event.DecodePayload(msg, &pay)

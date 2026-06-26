@@ -661,6 +661,13 @@ func sessionInputMessages(input helper.InputPayload) ([]event.Message, error) {
 		base.Type = event.TypeMouseMove
 		base.Payload = event.MouseMovePayload{DX: input.DX, DY: input.DY, Button: input.Button}
 		return []event.Message{base}, nil
+	case "mouse_move_abs":
+		if input.X == nil || input.Y == nil {
+			return nil, fmt.Errorf("mouse_move_abs requires x and y")
+		}
+		base.Type = event.TypeMouseMoveAbs
+		base.Payload = event.MouseMoveAbsPayload{X: *input.X, Y: *input.Y, Button: input.Button}
+		return []event.Message{base}, nil
 	case "mouse_button":
 		base.Type = event.TypeMouseButton
 		base.Payload = event.MouseButtonPayload{Button: input.Button, Pressed: input.Pressed}
