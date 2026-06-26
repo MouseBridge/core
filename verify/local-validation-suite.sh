@@ -16,7 +16,8 @@ DAEMON_A_LOG="/tmp/mousebridge-suite-daemon-a.log"
 DAEMON_B_LOG="/tmp/mousebridge-suite-daemon-b.log"
 HELPER_A_LOG="/tmp/mousebridge-suite-helper-a.log"
 HELPER_B_LOG="/tmp/mousebridge-suite-helper-b.log"
-SUMMARY_LOG="/tmp/mousebridge-local-validation-summary.log"
+SUMMARY_LOG="${MB_VALIDATION_SUMMARY_PATH:-/tmp/mousebridge-local-validation-summary.log}"
+CORE_DAEMON_BIN="/tmp/mousebridge-validation-daemon"
 
 TEXT="${1:-MouseBridge local suite}"
 BURST_COUNT="${2:-240}"
@@ -103,7 +104,7 @@ build_if_needed() {
   log "building core and helper"
   (
     cd "$CORE_DIR"
-    env GOCACHE="$CORE_DIR/.cache/go-build" go test -p 1 ./... >/dev/null
+    env GOCACHE="$CORE_DIR/.cache/go-build" go build -o "$CORE_DAEMON_BIN" ./cmd/mousebridge >/dev/null
   )
   (
     cd "$HELPER_DIR"
@@ -115,8 +116,7 @@ start_daemon() {
   local runtime_dir="$1"
   local log_file="$2"
   (
-    cd "$CORE_DIR"
-    env GOCACHE="$CORE_DIR/.cache/go-build" go run ./cmd/mousebridge daemon --data-dir "$runtime_dir" >"$log_file" 2>&1
+    "$CORE_DAEMON_BIN" daemon --data-dir "$runtime_dir" >"$log_file" 2>&1
   ) &
   echo $!
 }

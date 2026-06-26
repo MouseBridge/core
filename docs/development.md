@@ -40,6 +40,8 @@ go test ./...
 ./verify/local-two-node-macos.sh stop
 ```
 
+如果 daemon 是从当前仓库运行的，Web UI 也可以直接进入 `Validation` 页面触发同一套本机验证。这个页面会通过 `/api/local/validation/*` 调用 `verify/local-validation-suite.sh`，并展示最近一次运行的 summary/log 摘录。
+
 ## 双真机验证建议
 
 推荐顺序：
@@ -69,6 +71,8 @@ go test ./...
 - `local-loop-safety.sh`：本机双端场景下保持两侧 capture 开启，发送一段真实 remote inject，并检查控制端 helper 日志里没有新的 `sent input kind=` 回流事件，用来验证 anti-loop
 - `local-performance-benchmark.sh`：本机双端场景下自动建会话、临时关闭 capture、发送 batch burst、采样 `avg_latency_ms`，并解析 receiver helper 日志里的 injected/coalesced 计数，输出压缩比和延迟摘要
 - `local-validation-suite.sh`：单入口串联 smoke、anti-loop、performance benchmark。它会自动起本地两端 daemon/helper、准备 TextEdit、运行验证、打印总结并自行清理进程
+
+Web UI `Validation` 页面实际调用的就是 `local-validation-suite.sh`。当 daemon 不是从源码仓库运行，或运行时无法定位 `verify/local-validation-suite.sh` 时，页面会明确显示 `suite unavailable`。
 
 ## 日志降噪与调试
 

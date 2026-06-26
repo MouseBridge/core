@@ -93,6 +93,100 @@ func TestLocalHelperStatus(t *testing.T) {
 	}
 }
 
+func TestLocalValidationEndpoints(t *testing.T) {
+	repoDir := writeValidationScript(t, "#!/bin/sh\nset -eu\nSUMMARY=\"${MB_VALIDATION_SUMMARY_PATH:?}\"\necho \"run:$1:$2:$3:$4:$5\"\necho \"validation ok\" > \"$SUMMARY\"\nprintf 'validation finished\\n'\n")
+	t.Setenv("MB_CORE_REPO_DIR", repoDir)
+
+	_, _, addr := newTestServer(t)
+
+	resp, err := http.Get("http://" + addr + "/api/local/validation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var initial map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&initial); err != nil {
+		t.Fatal(err)
+	}
+	if initial["available"] != true {
+		t.Fatalf("available=%v want true", initial["available"])
+	}
+
+	body := bytes.NewBufferString(`{"text":"suite smoke","burst_count":42,"burst_batch_size":7,"latency_samples":3,"latency_interval":0.2}`)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/local/validation/run", body)
+	req.Header.Set("Content-Type", "application/json")
+	runResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runResp.Body.Close()
+	if runResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("want 202, got %d", runResp.StatusCode)
+	}
+
+	status := waitForValidationDone(t, "http://"+addr+"/api/local/validation")
+	if exitCode, ok := status["last_exit_code"].(float64); !ok || exitCode != 0 {
+		t.Fatalf("last_exit_code=%v want 0", status["last_exit_code"])
+	}
+	if !strings.Contains(statusString(status, "summary_excerpt"), "validation ok") {
+		t.Fatalf("summary_excerpt=%q missing validation ok", statusString(status, "summary_excerpt"))
+	}
+	if !strings.Contains(statusString(status, "log_excerpt"), "validation finished") {
+		t.Fatalf("log_excerpt=%q missing validation finished", statusString(status, "log_excerpt"))
+	}
+	lastRequest := status["last_request"].(map[string]interface{})
+	if lastRequest["text"] != "suite smoke" {
+		t.Fatalf("text=%v want suite smoke", lastRequest["text"])
+	}
+	if lastRequest["burst_count"] != float64(42) {
+		t.Fatalf("burst_count=%v want 42", lastRequest["burst_count"])
+	}
+}
+
+func TestLocalValidationStopEndpoint(t *testing.T) {
+	repoDir := writeValidationScript(t, "#!/bin/sh\nset -eu\nSUMMARY=\"${MB_VALIDATION_SUMMARY_PATH:?}\"\ntrap 'echo \"stopped\" > \"$SUMMARY\"; exit 130' TERM INT\nprintf 'validation waiting\\n'\nwhile :; do sleep 1; done\n")
+	t.Setenv("MB_CORE_REPO_DIR", repoDir)
+
+	_, _, addr := newTestServer(t)
+
+	runReq, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/local/validation/run", bytes.NewBufferString(`{}`))
+	runReq.Header.Set("Content-Type", "application/json")
+	runResp, err := http.DefaultClient.Do(runReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runResp.Body.Close()
+	if runResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("want 202, got %d", runResp.StatusCode)
+	}
+
+	waitForValidationRunning(t, "http://"+addr+"/api/local/validation")
+
+	stopReq, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/local/validation/stop", nil)
+	stopResp, err := http.DefaultClient.Do(stopReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopResp.Body.Close()
+	if stopResp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", stopResp.StatusCode)
+	}
+
+	status := waitForValidationDone(t, "http://"+addr+"/api/local/validation")
+	if status["running"] != false {
+		t.Fatalf("running=%v want false", status["running"])
+	}
+	if status["last_finished_at"] == nil {
+		t.Fatal("last_finished_at should be set after stop")
+	}
+	if status["last_error"] == nil {
+		t.Fatal("last_error should be populated after forced stop")
+	}
+}
+
 func TestLocalHelperInstall(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "helper-args.log")
@@ -142,6 +236,70 @@ func TestCORSHeaders(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("OPTIONS want 204, got %d", resp.StatusCode)
 	}
+}
+
+func writeValidationScript(t *testing.T, content string) string {
+	t.Helper()
+	repoDir := t.TempDir()
+	verifyDir := filepath.Join(repoDir, "verify")
+	if err := os.MkdirAll(verifyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(verifyDir, "local-validation-suite.sh")
+	if err := os.WriteFile(scriptPath, []byte(content), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return repoDir
+}
+
+func waitForValidationRunning(t *testing.T, url string) map[string]interface{} {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		status := getValidationStatus(t, url)
+		if running, _ := status["running"].(bool); running {
+			return status
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for validation runner to start")
+	return nil
+}
+
+func waitForValidationDone(t *testing.T, url string) map[string]interface{} {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		status := getValidationStatus(t, url)
+		if running, _ := status["running"].(bool); !running && status["last_finished_at"] != nil {
+			return status
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for validation runner to finish")
+	return nil
+}
+
+func getValidationStatus(t *testing.T, url string) map[string]interface{} {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var status map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	return status
+}
+
+func statusString(status map[string]interface{}, key string) string {
+	value, _ := status[key].(string)
+	return value
 }
 
 func TestSSEReceivesInitialStatus(t *testing.T) {

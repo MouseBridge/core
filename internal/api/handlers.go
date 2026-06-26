@@ -9,6 +9,7 @@ import (
 
 	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/helper"
+	"github.com/mousebridge/core/internal/localvalidate"
 	"github.com/mousebridge/core/internal/validate"
 )
 
@@ -22,6 +23,10 @@ func (s *Server) handleStatus(c *gin.Context) {
 
 func (s *Server) handleLocalHelperStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, s.d.LocalHelperStatus())
+}
+
+func (s *Server) handleLocalValidationStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, s.d.LocalValidationStatus())
 }
 
 func (s *Server) handleConnect(c *gin.Context) {
@@ -63,6 +68,27 @@ func (s *Server) handleLocalHelperOpenAccessibility(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleLocalValidationRun(c *gin.Context) {
+	var req localvalidate.RunRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+	if err := s.d.StartLocalValidation(req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("validation_run_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusAccepted, s.d.LocalValidationStatus())
+}
+
+func (s *Server) handleLocalValidationStop(c *gin.Context) {
+	if err := s.d.StopLocalValidation(); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("validation_stop_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, s.d.LocalValidationStatus())
 }
 
 func (s *Server) handleSessionDelete(c *gin.Context) {

@@ -19,6 +19,7 @@ import (
 	"github.com/mousebridge/core/internal/event"
 	"github.com/mousebridge/core/internal/helper"
 	"github.com/mousebridge/core/internal/localhelper"
+	"github.com/mousebridge/core/internal/localvalidate"
 	"github.com/mousebridge/core/internal/p2p"
 	"github.com/mousebridge/core/internal/pending"
 	"github.com/mousebridge/core/internal/remembered"
@@ -39,12 +40,13 @@ type Daemon struct {
 	cfg        *config.Config
 	identity   device.Identity
 
-	rem         *remembered.Store
-	pending     *pending.Manager
-	tracker     *p2p.OutboundTracker
-	helper      *helper.Manager
-	localHelper *localhelper.Runtime
-	ctrl        *switch_.Controller
+	rem             *remembered.Store
+	pending         *pending.Manager
+	tracker         *p2p.OutboundTracker
+	helper          *helper.Manager
+	localHelper     *localhelper.Runtime
+	localValidation *localvalidate.Runner
+	ctrl            *switch_.Controller
 
 	pausedMu       sync.RWMutex
 	paused         bool
@@ -134,6 +136,7 @@ func New(opts Options) (*Daemon, error) {
 		d.handleHelperInput,
 	)
 	d.localHelper = localhelper.NewRuntime(opts.DataDir, d.helper.ClientCount)
+	d.localValidation = localvalidate.NewRunner(opts.DataDir)
 	return d, nil
 }
 
@@ -181,6 +184,9 @@ func (d *Daemon) Stop() {
 	}
 	if d.helper != nil {
 		d.helper.Stop()
+	}
+	if d.localValidation != nil {
+		_ = d.localValidation.Stop()
 	}
 	d.lnMu.Lock()
 	if d.ln != nil {
@@ -480,6 +486,38 @@ func (d *Daemon) OpenLocalHelperAccessibility() error {
 		return fmt.Errorf("local helper runtime is not configured")
 	}
 	return d.localHelper.OpenAccessibility()
+}
+
+// LocalValidationStatus returns the current local validation runner status.
+func (d *Daemon) LocalValidationStatus() localvalidate.Status {
+	if d.localValidation == nil {
+		return localvalidate.Status{}
+	}
+	return d.localValidation.Status()
+}
+
+// StartLocalValidation starts the local validation suite.
+func (d *Daemon) StartLocalValidation(req localvalidate.RunRequest) error {
+	if d.localValidation == nil {
+		return fmt.Errorf("local validation runner is not configured")
+	}
+	if err := d.localValidation.Start(req); err != nil {
+		return err
+	}
+	d.broadcast(BusEvent{Kind: "log", Msg: "local validation started"})
+	return nil
+}
+
+// StopLocalValidation stops the local validation suite if it is running.
+func (d *Daemon) StopLocalValidation() error {
+	if d.localValidation == nil {
+		return fmt.Errorf("local validation runner is not configured")
+	}
+	if err := d.localValidation.Stop(); err != nil {
+		return err
+	}
+	d.broadcast(BusEvent{Kind: "log", Msg: "local validation stop requested"})
+	return nil
 }
 
 func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {

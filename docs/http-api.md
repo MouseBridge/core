@@ -91,6 +91,37 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 | `POST` | `/api/local/helper/restart` | `{}` | 重启 helper |
 | `POST` | `/api/local/helper/open-accessibility` | `{}` | 打开 macOS Accessibility 设置页 |
 
+## 本机 validation suite
+
+这些接口主要给 Web UI 的 `Validation` 页面使用，用于在单机双端模式下跑真实 smoke / anti-loop / batching-latency 验证。
+
+| 方法 | 路径 | 请求体 | 说明 |
+|------|------|--------|------|
+| `GET` | `/api/local/validation` | — | 读取本机 validation runner 状态、最近摘要与日志摘录 |
+| `POST` | `/api/local/validation/run` | 见下方 | 启动 `verify/local-validation-suite.sh` |
+| `POST` | `/api/local/validation/stop` | `{}` | 请求停止当前 validation run |
+
+请求体示例：
+
+```json
+{
+  "text": "MouseBridge local suite",
+  "burst_count": 240,
+  "burst_batch_size": 40,
+  "latency_samples": 12,
+  "latency_interval": 0.1
+}
+```
+
+返回字段包括：
+
+- `available`：当前 daemon 运行环境是否能找到 `verify/local-validation-suite.sh`
+- `running`：当前是否有 validation 在跑
+- `summary_path` / `log_path`：最近一次运行的摘要文件与日志文件路径
+- `summary_excerpt` / `log_excerpt`：最近一次运行的末尾摘录
+- `last_request`：最近一次运行的参数
+- `last_error` / `last_exit_code`：最近一次运行的退出信息
+
 ## 快捷键
 
 | 方法 | 路径 | 请求体 | 说明 |

@@ -2,7 +2,7 @@
 
 在局域网内转发鼠标和键盘输入的守护进程与 HTTP API。
 
-> 当前状态：`core` + `helper` 已能完成真实输入捕获、远端转发、远端注入、热键切换、边缘切换。推荐使用 Web UI 管理；CLI 目前只保留 `daemon` 作为稳定入口。Web UI 现可检查 helper 就绪度、安装/重启 LaunchAgent、打开 Accessibility 设置。
+> 当前状态：`core` + `helper` 已能完成真实输入捕获、远端转发、远端注入、热键切换、边缘切换。推荐使用 Web UI 管理；CLI 目前只保留 `daemon` 作为稳定入口。Web UI 现可检查 helper 就绪度、安装/重启 LaunchAgent、打开 Accessibility 设置，并可直接触发本机 `local validation suite`。
 
 ## 安装
 
@@ -29,6 +29,8 @@ mousebridge daemon
 - helper 已安装 LaunchAgent
 - helper 已授予 Accessibility
 - helper 已连回 daemon
+
+如果还没上双机，先在其中一台机器打开 Web UI 的 `Validation` 页面，跑一次单机双端验证，确认 smoke / anti-loop / batching-latency 都通过，再进入真实双机实验。
 
 3. 两台都准备好后，在发送端的 `Devices` 页面发起 `Connect` 到接收端 `ip:port`。
 
@@ -65,6 +67,7 @@ mousebridge daemon
 | PIN 配对 + remembered 自动重连 | ✅ |
 | Web UI 状态面板与设备管理 | ✅ |
 | Web UI setup / readiness 引导 | ✅ |
+| Web UI 本机 validation 页面 | ✅ |
 | 快捷键配置与推送 helper | ✅ |
 | 会话断开 / remembered 重命名 | ✅ |
 | 真实鼠标键盘捕获与注入 | ✅ |
