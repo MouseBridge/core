@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -71,5 +72,30 @@ func TestUpdateHotkeysPersistsConfig(t *testing.T) {
 	}
 	if loaded.Hotkeys.TogglePause != "ctrl+5" {
 		t.Fatalf("toggle_pause=%q want ctrl+5", loaded.Hotkeys.TogglePause)
+	}
+}
+
+func TestDaemonNewPersistsDefaultConfigWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+
+	d, err := daemon.New(daemon.Options{DataDir: dir, ConfigPath: configPath})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("config.json should exist after New: %v", err)
+	}
+
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Port != d.Config().Port {
+		t.Fatalf("port=%d want %d", loaded.Port, d.Config().Port)
+	}
+	if loaded.DeviceName != d.Config().DeviceName {
+		t.Fatalf("device_name=%q want %q", loaded.DeviceName, d.Config().DeviceName)
 	}
 }

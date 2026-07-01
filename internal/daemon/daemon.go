@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -102,6 +103,9 @@ func New(opts Options) (*Daemon, error) {
 	if cfg.DeviceName == "" {
 		cfg.DeviceName = identity.Name
 	}
+	if err := ensureConfigFile(opts.ConfigPath, cfg); err != nil {
+		return nil, fmt.Errorf("daemon: ensure config file: %w", err)
+	}
 
 	rem, err := remembered.New(opts.DataDir + "/remembered.json")
 	if err != nil {
@@ -138,6 +142,20 @@ func New(opts Options) (*Daemon, error) {
 	d.localHelper = localhelper.NewRuntime(opts.DataDir, d.helper.ClientCount)
 	d.localValidation = localvalidate.NewRunner(opts.DataDir)
 	return d, nil
+}
+
+func ensureConfigFile(configPath string, cfg *config.Config) error {
+	if configPath == "" || cfg == nil {
+		return nil
+	}
+	_, err := os.Stat(configPath)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return cfg.Save(configPath)
 }
 
 // Start begins listening on listen_host:port and starts background goroutines.

@@ -41,6 +41,7 @@ mousebridge daemon
 注意：
 
 - Web UI 依赖 daemon 提供，所以 daemon 仍需要先启动，UI 不能从零启动 daemon
+- daemon 首次使用新的 `data-dir` 时会自动写出 `config.json`，供 helper 与 LaunchAgent 直接复用
 - 如果要做双机实验，daemon 不能只监听 loopback；需要把 `listen_host` 改成对端可访问的地址，例如 `0.0.0.0`，并显式开启 `unsafe_http_lan=true`
 - helper 仍然是独立二进制，安装方式见 [`../helper/README.md`](../helper/README.md)
 
