@@ -25,6 +25,10 @@ func (s *Server) handleLocalHelperStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, s.d.LocalHelperStatus())
 }
 
+func (s *Server) handleLocalLabStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, s.d.LocalLabStatus())
+}
+
 func (s *Server) handleLocalValidationStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, s.d.LocalValidationStatus())
 }
@@ -68,6 +72,22 @@ func (s *Server) handleLocalHelperOpenAccessibility(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleLocalLabStart(c *gin.Context) {
+	if err := s.d.StartLocalLab(); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("local_lab_start_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusAccepted, s.d.LocalLabStatus())
+}
+
+func (s *Server) handleLocalLabStop(c *gin.Context) {
+	if err := s.d.StopLocalLab(); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("local_lab_stop_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, s.d.LocalLabStatus())
 }
 
 func (s *Server) handleLocalValidationRun(c *gin.Context) {

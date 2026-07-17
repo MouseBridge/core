@@ -57,6 +57,14 @@ func TestValidateLANWithUnsafe(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsRememberedAutoConnect(t *testing.T) {
+	cfg := config.Default()
+	cfg.RememberedAutoConnectEnabled = true
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error when remembered_auto_connect_enabled is true")
+	}
+}
+
 func TestSaveLoad(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

@@ -65,7 +65,7 @@ mousebridge daemon
 | 能力 | 状态 |
 |------|------|
 | 守护进程 + 单端口 P2P/HTTP | ✅ |
-| PIN 配对 + remembered 自动重连 | ✅ |
+| PIN 配对 + remembered 设备保存 | ✅ |
 | Web UI 状态面板与设备管理 | ✅ |
 | Web UI setup / readiness 引导 | ✅ |
 | Web UI 本机 validation 页面 | ✅ |
@@ -82,3 +82,4 @@ mousebridge daemon
 - [docs/cli.md](docs/cli.md)
 - [docs/configuration.md](docs/configuration.md)
 - [docs/development.md](docs/development.md)
+- [docs/two-mac-controller-test-plan.md](docs/two-mac-controller-test-plan.md)

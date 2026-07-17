@@ -252,16 +252,18 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 			if remStore != nil {
 				var pay event.PairAcceptPayload
 				_ = event.DecodePayload(reply, &pay)
-				now := time.Now()
-				_ = remStore.Add(remembered.Record{
-					DeviceID:   serverID,
-					DisplayID:  serverID[:12],
-					Name:       serverName,
-					SecretID:   pay.SecretID,
-					PairSecret: pay.PairSecret,
-					CreatedAt:  now,
-					LastSeenAt: now,
-				})
+				if pay.Remembered {
+					now := time.Now()
+					_ = remStore.Add(remembered.Record{
+						DeviceID:   serverID,
+						DisplayID:  serverID[:12],
+						Name:       serverName,
+						SecretID:   pay.SecretID,
+						PairSecret: pay.PairSecret,
+						CreatedAt:  now,
+						LastSeenAt: now,
+					})
+				}
 			}
 			emit(BusEvent{Kind: "paired", PairingID: pairingID, ConnectionID: connID,
 				DeviceID: serverID, Name: serverName})

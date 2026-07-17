@@ -146,6 +146,58 @@ func TestLocalValidationEndpoints(t *testing.T) {
 	}
 }
 
+func TestLocalLabEndpoints(t *testing.T) {
+	repoDir := writeScript(t, "local-lab.sh", "#!/bin/sh\nset -eu\nSUMMARY=\"${MB_LOCAL_LAB_SUMMARY_PATH:?}\"\necho 'state=ready' > \"$SUMMARY\"\necho 'controller_url=http://127.0.0.1:39273' >> \"$SUMMARY\"\necho 'receiver_url=http://127.0.0.1:39272' >> \"$SUMMARY\"\necho 'remote_session_device_id=abc123' >> \"$SUMMARY\"\nprintf 'local lab ready\\n'\nwhile :; do sleep 1; done\n")
+	t.Setenv("MB_CORE_REPO_DIR", repoDir)
+
+	_, _, addr := newTestServer(t)
+
+	resp, err := http.Get("http://" + addr + "/api/local/lab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	startReq, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/local/lab/start", nil)
+	startResp, err := http.DefaultClient.Do(startReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer startResp.Body.Close()
+	if startResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("want 202, got %d", startResp.StatusCode)
+	}
+
+	status := waitForLocalLabRunning(t, "http://"+addr+"/api/local/lab")
+	if statusString(status, "state") != "ready" {
+		t.Fatalf("state=%q want ready", statusString(status, "state"))
+	}
+	if statusString(status, "controller_url") != "http://127.0.0.1:39273" {
+		t.Fatalf("controller_url=%q", statusString(status, "controller_url"))
+	}
+	if statusString(status, "remote_session_device_id") != "abc123" {
+		t.Fatalf("remote_session_device_id=%q", statusString(status, "remote_session_device_id"))
+	}
+
+	stopReq, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/local/lab/stop", nil)
+	stopResp, err := http.DefaultClient.Do(stopReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopResp.Body.Close()
+	if stopResp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", stopResp.StatusCode)
+	}
+
+	status = waitForLocalLabStopped(t, "http://"+addr+"/api/local/lab")
+	if running, _ := status["running"].(bool); running {
+		t.Fatalf("running=%v want false", status["running"])
+	}
+}
+
 func TestLocalValidationStopEndpoint(t *testing.T) {
 	repoDir := writeValidationScript(t, "#!/bin/sh\nset -eu\nSUMMARY=\"${MB_VALIDATION_SUMMARY_PATH:?}\"\ntrap 'echo \"stopped\" > \"$SUMMARY\"; exit 130' TERM INT\nprintf 'validation waiting\\n'\nwhile :; do sleep 1; done\n")
 	t.Setenv("MB_CORE_REPO_DIR", repoDir)
@@ -240,12 +292,17 @@ func TestCORSHeaders(t *testing.T) {
 
 func writeValidationScript(t *testing.T, content string) string {
 	t.Helper()
+	return writeScript(t, "local-validation-suite.sh", content)
+}
+
+func writeScript(t *testing.T, name, content string) string {
+	t.Helper()
 	repoDir := t.TempDir()
 	verifyDir := filepath.Join(repoDir, "verify")
 	if err := os.MkdirAll(verifyDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	scriptPath := filepath.Join(verifyDir, "local-validation-suite.sh")
+	scriptPath := filepath.Join(verifyDir, name)
 	if err := os.WriteFile(scriptPath, []byte(content), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -277,6 +334,34 @@ func waitForValidationDone(t *testing.T, url string) map[string]interface{} {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for validation runner to finish")
+	return nil
+}
+
+func waitForLocalLabRunning(t *testing.T, url string) map[string]interface{} {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		status := getValidationStatus(t, url)
+		if running, _ := status["running"].(bool); running && statusString(status, "state") == "ready" {
+			return status
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for local lab to become ready")
+	return nil
+}
+
+func waitForLocalLabStopped(t *testing.T, url string) map[string]interface{} {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		status := getValidationStatus(t, url)
+		if running, _ := status["running"].(bool); !running && status["last_finished_at"] != nil {
+			return status
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for local lab to stop")
 	return nil
 }
 

@@ -20,6 +20,7 @@ type ServerHost interface {
 	PendingManager() *pending.Manager
 	RememberedStore() *remembered.Store
 	RememberedEnabled() bool
+	RememberedAutoConnectEnabled() bool
 }
 
 // BusEvent carries session lifecycle updates to the daemon for broadcasting.
@@ -87,18 +88,20 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 
 	// Check remembered.
 	rem := h.RememberedStore()
-	if rec, ok := rem.Get(claimedID); ok {
-		// Trusted remembered device: accept immediately (no PIN).
-		_ = c.Send(event.Message{
-			V: 1, Seq: nextSeq(), Type: event.TypePairAccept, Ts: nowMs(),
-			Payload: event.PairAcceptPayload{Remembered: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret},
-		})
-		_ = rem.UpdateLastSeen(claimedID, time.Now())
-		emit(BusEvent{Kind: "session_connected", DeviceID: claimedID, DisplayID: peerDisplayID, Name: peerName, RemoteIP: remoteAddr, Role: "server"})
-		log.Printf("[p2p] remembered device %s (%s) auto-connected", peerName, claimedID[:12])
-		adopted = true
-		go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
-		return
+	if h.RememberedAutoConnectEnabled() {
+		if rec, ok := rem.Get(claimedID); ok {
+			// Trusted remembered device: accept immediately (no PIN).
+			_ = c.Send(event.Message{
+				V: 1, Seq: nextSeq(), Type: event.TypePairAccept, Ts: nowMs(),
+				Payload: event.PairAcceptPayload{Remembered: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret},
+			})
+			_ = rem.UpdateLastSeen(claimedID, time.Now())
+			emit(BusEvent{Kind: "session_connected", DeviceID: claimedID, DisplayID: peerDisplayID, Name: peerName, RemoteIP: remoteAddr, Role: "server"})
+			log.Printf("[p2p] remembered device %s (%s) auto-connected", peerName, claimedID[:12])
+			adopted = true
+			go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
+			return
+		}
 	}
 
 	// New device: start PIN pairing.

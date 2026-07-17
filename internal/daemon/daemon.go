@@ -20,6 +20,7 @@ import (
 	"github.com/mousebridge/core/internal/event"
 	"github.com/mousebridge/core/internal/helper"
 	"github.com/mousebridge/core/internal/localhelper"
+	"github.com/mousebridge/core/internal/locallab"
 	"github.com/mousebridge/core/internal/localvalidate"
 	"github.com/mousebridge/core/internal/p2p"
 	"github.com/mousebridge/core/internal/pending"
@@ -46,6 +47,7 @@ type Daemon struct {
 	tracker         *p2p.OutboundTracker
 	helper          *helper.Manager
 	localHelper     *localhelper.Runtime
+	localLab        *locallab.Runner
 	localValidation *localvalidate.Runner
 	ctrl            *switch_.Controller
 
@@ -140,6 +142,7 @@ func New(opts Options) (*Daemon, error) {
 		d.handleHelperInput,
 	)
 	d.localHelper = localhelper.NewRuntime(opts.DataDir, d.helper.ClientCount)
+	d.localLab = locallab.NewRunner(opts.DataDir)
 	d.localValidation = localvalidate.NewRunner(opts.DataDir)
 	return d, nil
 }
@@ -206,6 +209,9 @@ func (d *Daemon) Stop() {
 	if d.localValidation != nil {
 		_ = d.localValidation.Stop()
 	}
+	if d.localLab != nil {
+		_ = d.localLab.Stop()
+	}
 	d.lnMu.Lock()
 	if d.ln != nil {
 		_ = d.ln.Close()
@@ -253,6 +259,9 @@ func (d *Daemon) LocalDisplayID() string             { return d.identity.Display
 func (d *Daemon) PendingManager() *pending.Manager   { return d.pending }
 func (d *Daemon) RememberedStore() *remembered.Store { return d.rem }
 func (d *Daemon) RememberedEnabled() bool            { return d.cfg.RememberedEnabled }
+func (d *Daemon) RememberedAutoConnectEnabled() bool {
+	return d.cfg.RememberedAutoConnectEnabled
+}
 
 // p2p.SessionHost interface
 func (d *Daemon) TrackConn(c *transport.Conn, deviceID string) {
@@ -512,6 +521,38 @@ func (d *Daemon) LocalValidationStatus() localvalidate.Status {
 		return localvalidate.Status{}
 	}
 	return d.localValidation.Status()
+}
+
+// LocalLabStatus returns the current local two-node lab status.
+func (d *Daemon) LocalLabStatus() locallab.Status {
+	if d.localLab == nil {
+		return locallab.Status{}
+	}
+	return d.localLab.Status()
+}
+
+// StartLocalLab starts the long-lived local two-node lab.
+func (d *Daemon) StartLocalLab() error {
+	if d.localLab == nil {
+		return fmt.Errorf("local lab runner is not configured")
+	}
+	if err := d.localLab.Start(); err != nil {
+		return err
+	}
+	d.broadcast(BusEvent{Kind: "log", Msg: "local lab started"})
+	return nil
+}
+
+// StopLocalLab stops the local two-node lab.
+func (d *Daemon) StopLocalLab() error {
+	if d.localLab == nil {
+		return fmt.Errorf("local lab runner is not configured")
+	}
+	if err := d.localLab.Stop(); err != nil {
+		return err
+	}
+	d.broadcast(BusEvent{Kind: "log", Msg: "local lab stop requested"})
+	return nil
 }
 
 // StartLocalValidation starts the local validation suite.
