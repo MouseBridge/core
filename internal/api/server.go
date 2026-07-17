@@ -80,6 +80,8 @@ func (s *Server) routes(r *gin.Engine) {
 	api.GET("/shortcuts", s.handleShortcutsGet)
 	api.PUT("/shortcuts", s.handleShortcutsPut)
 	api.POST("/control/switch-to-host", s.handleControlSwitchToHost)
+	api.POST("/control/switch-next", s.handleControlSwitchNext)
+	api.POST("/control/switch-prev", s.handleControlSwitchPrev)
 	api.POST("/control/disconnect-all", s.handleControlDisconnectAll)
 	api.POST("/control/toggle-pause", s.handleControlTogglePause)
 	api.PUT("/control/capture", s.handleControlCapturePut)

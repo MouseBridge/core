@@ -782,6 +782,20 @@ func (d *Daemon) SwitchToHost() {
 	}
 }
 
+func (d *Daemon) SwitchNext() {
+	d.switchRelative(1)
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+}
+
+func (d *Daemon) SwitchPrev() {
+	d.switchRelative(-1)
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+}
+
 func (d *Daemon) TogglePause() bool {
 	d.pausedMu.Lock()
 	d.paused = !d.paused

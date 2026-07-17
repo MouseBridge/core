@@ -499,6 +499,40 @@ func TestControlSwitchToHost(t *testing.T) {
 	}
 }
 
+func TestControlSwitchNext(t *testing.T) {
+	_, d, addr := newTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/control/switch-next", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if got := d.State().ActiveTargetID; got != d.State().Daemon.DeviceID {
+		t.Fatalf("active_target_device_id=%q want local %q with no sessions", got, d.State().Daemon.DeviceID)
+	}
+}
+
+func TestControlSwitchPrev(t *testing.T) {
+	_, d, addr := newTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/control/switch-prev", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if got := d.State().ActiveTargetID; got != d.State().Daemon.DeviceID {
+		t.Fatalf("active_target_device_id=%q want local %q with no sessions", got, d.State().Daemon.DeviceID)
+	}
+}
+
 func TestControlCapturePut(t *testing.T) {
 	_, d, addr := newTestServer(t)
 

@@ -128,6 +128,8 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 |------|------|--------|------|
 | `GET` | `/api/shortcuts` | — | 当前快捷键配置 |
 | `PUT` | `/api/shortcuts` | 见下方 | 更新快捷键并立即推送给 helper |
+| `POST` | `/api/control/switch-next` | — | 切到下一个远端设备；没有活动远端时保持在本机 |
+| `POST` | `/api/control/switch-prev` | — | 切到上一个远端设备；没有活动远端时保持在本机 |
 | `POST` | `/api/control/switch-to-host` | — | 立即切回本机控制 |
 | `POST` | `/api/control/disconnect-all` | — | 断开全部会话并停留在本机 |
 | `POST` | `/api/control/toggle-pause` | — | 暂停/恢复输入转发 |

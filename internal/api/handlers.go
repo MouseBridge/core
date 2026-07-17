@@ -222,6 +222,26 @@ func (s *Server) handleControlSwitchToHost(c *gin.Context) {
 	})
 }
 
+func (s *Server) handleControlSwitchNext(c *gin.Context) {
+	s.d.SwitchNext()
+	state := s.d.State()
+	c.JSON(http.StatusOK, gin.H{
+		"ok":                      true,
+		"active_target_device_id": state.ActiveTargetID,
+		"controlling_remote":      state.ControllingRemote,
+	})
+}
+
+func (s *Server) handleControlSwitchPrev(c *gin.Context) {
+	s.d.SwitchPrev()
+	state := s.d.State()
+	c.JSON(http.StatusOK, gin.H{
+		"ok":                      true,
+		"active_target_device_id": state.ActiveTargetID,
+		"controlling_remote":      state.ControllingRemote,
+	})
+}
+
 func (s *Server) handleControlDisconnectAll(c *gin.Context) {
 	s.d.DisconnectAll()
 	c.JSON(http.StatusOK, gin.H{"ok": true})
