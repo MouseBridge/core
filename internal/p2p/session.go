@@ -196,62 +196,29 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 		return
 	}
 
-	// Wait for pair_challenge from server.
-	msg, err := c.Recv()
-	if err != nil {
-		emit(BusEvent{Kind: "error", Msg: "connection lost waiting for pair_challenge"})
-		return
-	}
-	if msg.Type == event.TypePairAccept {
-		// Remembered auto-connect: server already knows us; update last_seen.
-		if remStore != nil {
-			_ = remStore.UpdateLastSeen(serverID, time.Now())
-		}
-		adopted = true
-		go RunSession(c, serverID, serverName, "client", h, emit)
-		return
-	}
-	if msg.Type != event.TypePairChallenge {
-		emit(BusEvent{Kind: "error", Msg: "unexpected message: " + msg.Type})
-		return
-	}
-	var challenge event.PairChallengePayload
-	_ = event.DecodePayload(msg, &challenge)
-	pairingID := challenge.PairingID
-
-	// Register in tracker BEFORE emitting pair_request so SendPIN can immediately
-	// find the connection when the UI/test reacts to the event.
-	if tracker != nil {
-		tracker.Add(&OutboundPairing{
-			PairingID:       pairingID,
-			ConnectionID:    connID,
-			RemoteName:      serverName,
-			RemoteDisplayID: serverID[:12],
-			ExpiresAt:       time.Now().Add(2 * time.Minute),
-			Conn:            c,
-		})
-		defer tracker.Remove(pairingID)
-	}
-
-	emit(BusEvent{
-		Kind: "pair_request", PairingID: pairingID, ConnectionID: connID,
-		ClaimedDeviceID: serverID, DisplayID: serverID[:12], Name: serverName,
-		RemoteIP: c.RemoteAddr().String(), Role: "client",
-	})
-	log.Printf("[p2p] pairing with %s — enter PIN shown on remote device", serverName)
+	pairingID := ""
 
 	for {
 		reply, err := c.Recv()
 		if err != nil {
-			emit(BusEvent{Kind: "error", Msg: "connection lost during PIN exchange"})
+			emit(BusEvent{Kind: "error", Msg: "connection lost during pairing"})
 			return
 		}
 		switch reply.Type {
 		case event.TypePairAccept:
-			// Save server as remembered device on client side.
+			var pay event.PairAcceptPayload
+			_ = event.DecodePayload(reply, &pay)
+			if pairingID == "" && pay.Remembered {
+				if remStore != nil {
+					_ = remStore.UpdateLastSeen(serverID, time.Now())
+				}
+				adopted = true
+				go RunSession(c, serverID, serverName, "client", h, emit)
+				return
+			}
+
+			// Save server as remembered device on client side after successful PIN pairing.
 			if remStore != nil {
-				var pay event.PairAcceptPayload
-				_ = event.DecodePayload(reply, &pay)
 				if pay.Remembered {
 					now := time.Now()
 					_ = remStore.Add(remembered.Record{
@@ -271,13 +238,54 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 			adopted = true
 			go RunSession(c, serverID, serverName, "client", h, emit)
 			return
+		case event.TypeRememberedChallenge:
+			var pay event.RememberedChallengePayload
+			_ = event.DecodePayload(reply, &pay)
+			proof := ""
+			if remStore != nil {
+				if rec, ok := remStore.Get(serverID); ok && rec.SecretID == pay.SecretID {
+					proof = computeRememberedProof(rec.PairSecret, localID, serverID, pay.SecretID, pay.Nonce)
+				}
+			}
+			if sendErr := c.Send(event.Message{
+				V: 1, Seq: nextSeq(), Type: event.TypeRememberedProof, Ts: nowMs(),
+				Payload: event.RememberedProofPayload{SecretID: pay.SecretID, Proof: proof},
+			}); sendErr != nil {
+				emit(BusEvent{Kind: "error", Msg: "failed to send trusted reconnect proof"})
+				return
+			}
+		case event.TypePairChallenge:
+			var challenge event.PairChallengePayload
+			_ = event.DecodePayload(reply, &challenge)
+			pairingID = challenge.PairingID
+
+			// Register in tracker BEFORE emitting pair_request so SendPIN can immediately
+			// find the connection when the UI/test reacts to the event.
+			if tracker != nil {
+				tracker.Add(&OutboundPairing{
+					PairingID:       pairingID,
+					ConnectionID:    connID,
+					RemoteName:      serverName,
+					RemoteDisplayID: serverID[:12],
+					ExpiresAt:       time.Now().Add(2 * time.Minute),
+					Conn:            c,
+				})
+				defer tracker.Remove(pairingID)
+			}
+
+			emit(BusEvent{
+				Kind: "pair_request", PairingID: pairingID, ConnectionID: connID,
+				ClaimedDeviceID: serverID, DisplayID: serverID[:12], Name: serverName,
+				RemoteIP: c.RemoteAddr().String(), Role: "client",
+			})
+			log.Printf("[p2p] pairing with %s — enter PIN shown on remote device", serverName)
 		case event.TypePairReject:
 			emit(BusEvent{Kind: "pair_reject", PairingID: pairingID, Msg: "rejected by server"})
 			return
 		case event.TypePairRetry:
 			var pay event.PairRetryPayload
 			_ = event.DecodePayload(reply, &pay)
-			emit(BusEvent{Kind: "pair_retry", PairingID: pairingID, AttemptsRemaining: pay.AttemptsRemaining})
+			emit(BusEvent{Kind: "pair_retry", PairingID: pay.PairingID, AttemptsRemaining: pay.AttemptsRemaining})
 		}
 	}
 }

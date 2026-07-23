@@ -11,6 +11,8 @@ const (
 	TypePairAccept    = "pair_accept"
 	TypePairReject    = "pair_reject"
 	TypePairRetry     = "pair_retry"
+	TypeRememberedChallenge = "remembered_challenge"
+	TypeRememberedProof     = "remembered_proof"
 
 	// Session phase
 	TypePing          = "ping"
@@ -62,6 +64,18 @@ type PairAcceptPayload struct {
 	Remembered bool   `json:"remembered"`
 	SecretID   string `json:"secret_id,omitempty"`
 	PairSecret string `json:"pair_secret,omitempty"`
+}
+
+// RememberedChallengePayload asks the peer to prove it still holds the remembered secret.
+type RememberedChallengePayload struct {
+	SecretID string `json:"secret_id"`
+	Nonce    string `json:"nonce"`
+}
+
+// RememberedProofPayload returns the signed proof for one remembered challenge.
+type RememberedProofPayload struct {
+	SecretID string `json:"secret_id"`
+	Proof    string `json:"proof,omitempty"`
 }
 
 // PairRejectPayload is sent on final rejection.

@@ -12,35 +12,43 @@ import (
 
 // Record is the full internal representation, including secrets.
 type Record struct {
-	DeviceID   string    `json:"device_id"`
-	DisplayID  string    `json:"display_id"`
-	Name       string    `json:"name"`
-	Alias      string    `json:"alias,omitempty"`
-	SecretID   string    `json:"secret_id"`
-	PairSecret string    `json:"pair_secret"`
-	CreatedAt  time.Time `json:"created_at"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	DeviceID           string    `json:"device_id"`
+	DisplayID          string    `json:"display_id"`
+	Name               string    `json:"name"`
+	Alias              string    `json:"alias,omitempty"`
+	SecretID           string    `json:"secret_id"`
+	PairSecret         string    `json:"pair_secret"`
+	TrustedAutoConnect bool      `json:"trusted_auto_connect"`
+	CreatedAt          time.Time `json:"created_at"`
+	LastSeenAt         time.Time `json:"last_seen_at"`
 }
 
 // DTO is the API/SSE-safe view; never contains pair_secret or secret_id.
 type DTO struct {
-	DeviceID   string `json:"device_id"`
-	DisplayID  string `json:"display_id"`
-	Name       string `json:"name"`
-	Alias      string `json:"alias,omitempty"`
-	CreatedAt  int64  `json:"created_at"`
-	LastSeenAt int64  `json:"last_seen_at"`
+	DeviceID           string `json:"device_id"`
+	DisplayID          string `json:"display_id"`
+	Name               string `json:"name"`
+	Alias              string `json:"alias,omitempty"`
+	TrustedAutoConnect bool   `json:"trusted_auto_connect"`
+	CreatedAt          int64  `json:"created_at"`
+	LastSeenAt         int64  `json:"last_seen_at"`
 }
 
 func toDTO(r Record) DTO {
 	return DTO{
-		DeviceID:   r.DeviceID,
-		DisplayID:  r.DisplayID,
-		Name:       r.Name,
-		Alias:      r.Alias,
-		CreatedAt:  r.CreatedAt.Unix(),
-		LastSeenAt: r.LastSeenAt.Unix(),
+		DeviceID:           r.DeviceID,
+		DisplayID:          r.DisplayID,
+		Name:               r.Name,
+		Alias:              r.Alias,
+		TrustedAutoConnect: r.TrustedAutoConnect,
+		CreatedAt:          r.CreatedAt.Unix(),
+		LastSeenAt:         r.LastSeenAt.Unix(),
 	}
+}
+
+type Patch struct {
+	Alias              *string
+	TrustedAutoConnect *bool
 }
 
 // Store is a concurrent-safe remembered device store with atomic persistence.
@@ -108,6 +116,11 @@ func (s *Store) Remove(deviceID string) error {
 
 // Rename updates the alias of a record.
 func (s *Store) Rename(deviceID, alias string) error {
+	return s.Patch(deviceID, Patch{Alias: &alias})
+}
+
+// Patch updates selected fields of a remembered record.
+func (s *Store) Patch(deviceID string, patch Patch) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
@@ -118,7 +131,12 @@ func (s *Store) Rename(deviceID, alias string) error {
 		return fmt.Errorf("remembered: device %s not found", deviceID)
 	}
 	next := cloneMap(s.records)
-	rec.Alias = alias
+	if patch.Alias != nil {
+		rec.Alias = *patch.Alias
+	}
+	if patch.TrustedAutoConnect != nil {
+		rec.TrustedAutoConnect = *patch.TrustedAutoConnect
+	}
 	next[deviceID] = rec
 	err := s.persist(next)
 	if err == nil {

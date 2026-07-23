@@ -105,9 +105,6 @@ func (c *Config) Validate() error {
 	if !isLoopback(c.ListenHost) && !c.UnsafeHTTPLAN {
 		return fmt.Errorf("config: listen_host=%q is not loopback but unsafe_http_lan=false; set unsafe_http_lan=true to allow LAN HTTP access", c.ListenHost)
 	}
-	if c.RememberedAutoConnectEnabled {
-		return fmt.Errorf("config: remembered_auto_connect_enabled=true is not supported yet; safe remembered proof is not implemented")
-	}
 	return nil
 }
 

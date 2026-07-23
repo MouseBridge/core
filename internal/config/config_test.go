@@ -57,11 +57,11 @@ func TestValidateLANWithUnsafe(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsRememberedAutoConnect(t *testing.T) {
+func TestValidateAllowsRememberedAutoConnect(t *testing.T) {
 	cfg := config.Default()
 	cfg.RememberedAutoConnectEnabled = true
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected error when remembered_auto_connect_enabled is true")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("remembered_auto_connect_enabled should be valid now: %v", err)
 	}
 }
 

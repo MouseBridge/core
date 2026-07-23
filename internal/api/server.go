@@ -77,6 +77,7 @@ func (s *Server) routes(r *gin.Engine) {
 	api.GET("/remembered", s.handleRememberedList)
 	api.DELETE("/remembered/:device_id", s.handleRememberedDelete)
 	api.PATCH("/remembered/:device_id", s.handleRememberedRename)
+	api.PUT("/remembered/settings", s.handleRememberedSettingsPut)
 	api.GET("/shortcuts", s.handleShortcutsGet)
 	api.PUT("/shortcuts", s.handleShortcutsPut)
 	api.POST("/control/switch-to-host", s.handleControlSwitchToHost)

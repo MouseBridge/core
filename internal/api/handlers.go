@@ -10,6 +10,7 @@ import (
 	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/helper"
 	"github.com/mousebridge/core/internal/localvalidate"
+	"github.com/mousebridge/core/internal/remembered"
 	"github.com/mousebridge/core/internal/validate"
 )
 
@@ -178,21 +179,49 @@ func (s *Server) handleRememberedRename(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Alias string `json:"alias"`
+		Alias              *string `json:"alias"`
+		TrustedAutoConnect *bool   `json:"trusted_auto_connect"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
 		return
 	}
-	if err := validate.SafeString(req.Alias); err != nil {
-		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "alias contains invalid characters"))
+	if req.Alias == nil && req.TrustedAutoConnect == nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "at least one remembered field is required"))
 		return
 	}
-	if err := s.d.RememberedRename(deviceID, req.Alias); err != nil {
+	if req.Alias != nil {
+		if err := validate.SafeString(*req.Alias); err != nil {
+			c.JSON(http.StatusBadRequest, apiErr("invalid_request", "alias contains invalid characters"))
+			return
+		}
+	}
+	if err := s.d.RememberedPatch(deviceID, remembered.Patch{
+		Alias:              req.Alias,
+		TrustedAutoConnect: req.TrustedAutoConnect,
+	}); err != nil {
 		c.JSON(http.StatusNotFound, apiErr("not_found", err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleRememberedSettingsPut(c *gin.Context) {
+	var req struct {
+		AutoConnectEnabled *bool `json:"auto_connect_enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.AutoConnectEnabled == nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "auto_connect_enabled is required"))
+		return
+	}
+	if err := s.d.UpdateRememberedAutoConnectEnabled(*req.AutoConnectEnabled); err != nil {
+		c.JSON(http.StatusInternalServerError, apiErr("internal_error", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok":                   true,
+		"auto_connect_enabled": s.d.Config().RememberedAutoConnectEnabled,
+	})
 }
 
 func (s *Server) handleShortcutsGet(c *gin.Context) {

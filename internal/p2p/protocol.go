@@ -1,7 +1,10 @@
 package p2p
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -57,4 +60,18 @@ func randomHex(n int) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%x", b), nil
+}
+
+func computeRememberedProof(pairSecret, clientDeviceID, serverDeviceID, secretID, nonce string) string {
+	mac := hmac.New(sha256.New, []byte(pairSecret))
+	mac.Write([]byte("mousebridge-remembered-proof"))
+	mac.Write([]byte{0})
+	mac.Write([]byte(clientDeviceID))
+	mac.Write([]byte{0})
+	mac.Write([]byte(serverDeviceID))
+	mac.Write([]byte{0})
+	mac.Write([]byte(secretID))
+	mac.Write([]byte{0})
+	mac.Write([]byte(nonce))
+	return hex.EncodeToString(mac.Sum(nil))
 }

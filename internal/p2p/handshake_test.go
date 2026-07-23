@@ -101,6 +101,101 @@ func TestHandleInboundRememberedDeviceRequiresPINWhenAutoConnectDisabled(t *test
 	}
 }
 
+func TestHandleInboundRememberedDeviceUsesChallengeProofWhenTrusted(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	rem, err := remembered.New(filepath.Join(t.TempDir(), "remembered.json"))
+	if err != nil {
+		t.Fatalf("remembered.New: %v", err)
+	}
+
+	clientID := "1234567890abcdef1234567890abcdef"
+	now := time.Now()
+	rec := remembered.Record{
+		DeviceID:           clientID,
+		DisplayID:          clientID[:12],
+		Name:               "Client",
+		SecretID:           "remembered-secret-id",
+		PairSecret:         "remembered-pair-secret",
+		TrustedAutoConnect: true,
+		CreatedAt:          now,
+		LastSeenAt:         now,
+	}
+	if err := rem.Add(rec); err != nil {
+		t.Fatalf("rem.Add: %v", err)
+	}
+
+	host := &fakeServerHost{
+		localID:                      "abcdef1234567890abcdef1234567890",
+		localName:                    "Server",
+		localDisplayID:               "abcdef123456",
+		pending:                      pending.New(2*time.Minute, 3),
+		rem:                          rem,
+		rememberedEnabled:            true,
+		rememberedAutoConnectEnabled: true,
+	}
+	sessionHost := &fakeSessionHost{inputs: make(chan helper.InputPayload, 1)}
+	events := make(chan BusEvent, 4)
+
+	go HandleInbound(transport.NewConn(server), host.localID, host, sessionHost, func(ev BusEvent) {
+		events <- ev
+	})
+
+	clientConn := transport.NewConn(client)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- sendHello(clientConn, clientID, clientID[:12], "Client")
+	}()
+	if _, err := recvHello(clientConn); err != nil {
+		t.Fatalf("recvHello: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("sendHello: %v", err)
+	}
+
+	msg, err := clientConn.Recv()
+	if err != nil {
+		t.Fatalf("Recv remembered challenge: %v", err)
+	}
+	if msg.Type != event.TypeRememberedChallenge {
+		t.Fatalf("msg.Type=%q want %q", msg.Type, event.TypeRememberedChallenge)
+	}
+	var challenge event.RememberedChallengePayload
+	_ = event.DecodePayload(msg, &challenge)
+	if challenge.SecretID != rec.SecretID {
+		t.Fatalf("challenge.SecretID=%q want %q", challenge.SecretID, rec.SecretID)
+	}
+
+	if err := clientConn.Send(event.Message{
+		V: 1, Seq: 2, Type: event.TypeRememberedProof, Ts: time.Now().UnixMilli(),
+		Payload: event.RememberedProofPayload{
+			SecretID: rec.SecretID,
+			Proof:    computeRememberedProof(rec.PairSecret, clientID, host.localID, rec.SecretID, challenge.Nonce),
+		},
+	}); err != nil {
+		t.Fatalf("Send remembered_proof: %v", err)
+	}
+
+	reply, err := clientConn.Recv()
+	if err != nil {
+		t.Fatalf("Recv pair_accept: %v", err)
+	}
+	if reply.Type != event.TypePairAccept {
+		t.Fatalf("reply.Type=%q want %q", reply.Type, event.TypePairAccept)
+	}
+
+	select {
+	case ev := <-events:
+		if ev.Kind != "session_connected" {
+			t.Fatalf("event kind=%q want session_connected", ev.Kind)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for session_connected event")
+	}
+}
+
 func TestDialAndPairSkipsRememberedSaveWhenServerDoesNotRemember(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()

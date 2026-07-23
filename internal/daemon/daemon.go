@@ -475,6 +475,22 @@ func (d *Daemon) RememberedForget(deviceID string) error { return d.rem.Remove(d
 // RememberedRename updates the alias of a remembered device.
 func (d *Daemon) RememberedRename(deviceID, alias string) error { return d.rem.Rename(deviceID, alias) }
 
+// RememberedPatch updates selected fields of a remembered device.
+func (d *Daemon) RememberedPatch(deviceID string, patch remembered.Patch) error {
+	return d.rem.Patch(deviceID, patch)
+}
+
+// UpdateRememberedAutoConnectEnabled toggles trusted reconnect for this daemon.
+func (d *Daemon) UpdateRememberedAutoConnectEnabled(enabled bool) error {
+	d.cfg.RememberedAutoConnectEnabled = enabled
+	if d.configPath != "" {
+		if err := d.cfg.Save(d.configPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // HelperSocketPath returns the daemon-side helper IPC socket path.
 func (d *Daemon) HelperSocketPath() string {
 	if d.helper == nil {

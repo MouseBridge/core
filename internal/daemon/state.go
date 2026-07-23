@@ -48,6 +48,7 @@ type StatusSnapshot struct {
 	ControllingRemote bool                `json:"controlling_remote"`
 	Paused            bool                `json:"paused"`
 	CaptureEnabled    bool                `json:"capture_enabled"`
+	RememberedAutoConnectEnabled bool     `json:"remembered_auto_connect_enabled"`
 	UnsafeHTTPLAN     bool                `json:"unsafe_http_lan"`
 }
 
@@ -119,6 +120,7 @@ func (d *Daemon) State() StatusSnapshot {
 		ControllingRemote: activeTarget != "" && activeTarget != id.DeviceID,
 		Paused:            paused,
 		CaptureEnabled:    captureEnabled,
+		RememberedAutoConnectEnabled: d.cfg.RememberedAutoConnectEnabled,
 		UnsafeHTTPLAN:     d.cfg.UnsafeHTTPLAN,
 	}
 }
