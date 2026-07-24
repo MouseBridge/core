@@ -37,23 +37,32 @@ type DaemonInfo struct {
 
 // StatusSnapshot is the full status returned by GET /api/status and the SSE status event.
 type StatusSnapshot struct {
-	Daemon            DaemonInfo          `json:"daemon"`
-	Listening         bool                `json:"listening"`
-	ListenAddr        string              `json:"listen_addr,omitempty"`
-	Sessions          []SessionStatus     `json:"sessions"`
-	PendingPairs      []PendingPairStatus `json:"pending_pairs"`
-	RememberedDevices []remembered.DTO    `json:"remembered_devices"`
-	HelperRuntime     localhelper.Status  `json:"helper_runtime"`
-	ActiveTargetID    string              `json:"active_target_device_id"`
-	ControllingRemote bool                `json:"controlling_remote"`
-	Paused            bool                `json:"paused"`
-	CaptureEnabled    bool                `json:"capture_enabled"`
-	RememberedAutoConnectEnabled bool     `json:"remembered_auto_connect_enabled"`
-	UnsafeHTTPLAN     bool                `json:"unsafe_http_lan"`
+	Daemon                       DaemonInfo          `json:"daemon"`
+	Listening                    bool                `json:"listening"`
+	ListenAddr                   string              `json:"listen_addr,omitempty"`
+	Sessions                     []SessionStatus     `json:"sessions"`
+	PendingPairs                 []PendingPairStatus `json:"pending_pairs"`
+	RememberedDevices            []remembered.DTO    `json:"remembered_devices"`
+	HelperRuntime                localhelper.Status  `json:"helper_runtime"`
+	ActiveTargetID               string              `json:"active_target_device_id"`
+	ControllingRemote            bool                `json:"controlling_remote"`
+	Paused                       bool                `json:"paused"`
+	CaptureEnabled               bool                `json:"capture_enabled"`
+	RememberedAutoConnectEnabled bool                `json:"remembered_auto_connect_enabled"`
+	UnsafeHTTPLAN                bool                `json:"unsafe_http_lan"`
 }
 
-// State returns a consistent snapshot of the daemon's current state.
+// State returns the public status view safe to expose over LAN HTTP.
 func (d *Daemon) State() StatusSnapshot {
+	return d.stateSnapshot(false)
+}
+
+// LocalState returns the local admin status view, including sensitive pairing PINs.
+func (d *Daemon) LocalState() StatusSnapshot {
+	return d.stateSnapshot(true)
+}
+
+func (d *Daemon) stateSnapshot(includeDisplayPIN bool) StatusSnapshot {
 	id := d.identity
 
 	d.sessMu.RLock()
@@ -82,7 +91,9 @@ func (d *Daemon) State() StatusSnapshot {
 			Role:              "server",
 			ExpiresAt:         e.ExpiresAt.Unix(),
 			AttemptsRemaining: e.AttemptsRemaining(),
-			DisplayPIN:        d.pending.PIN(e.PairingID),
+		}
+		if includeDisplayPIN {
+			ps.DisplayPIN = d.pending.PIN(e.PairingID)
 		}
 		pendingStatuses = append(pendingStatuses, ps)
 	}
@@ -110,17 +121,17 @@ func (d *Daemon) State() StatusSnapshot {
 			DisplayID: id.DisplayID,
 			Name:      id.Name,
 		},
-		Listening:         addr != "",
-		ListenAddr:        addr,
-		Sessions:          sessions,
-		PendingPairs:      pendingStatuses,
-		RememberedDevices: d.rem.List(),
-		HelperRuntime:     d.LocalHelperStatus(),
-		ActiveTargetID:    activeTarget,
-		ControllingRemote: activeTarget != "" && activeTarget != id.DeviceID,
-		Paused:            paused,
-		CaptureEnabled:    captureEnabled,
+		Listening:                    addr != "",
+		ListenAddr:                   addr,
+		Sessions:                     sessions,
+		PendingPairs:                 pendingStatuses,
+		RememberedDevices:            d.rem.List(),
+		HelperRuntime:                d.LocalHelperStatus(),
+		ActiveTargetID:               activeTarget,
+		ControllingRemote:            activeTarget != "" && activeTarget != id.DeviceID,
+		Paused:                       paused,
+		CaptureEnabled:               captureEnabled,
 		RememberedAutoConnectEnabled: d.cfg.RememberedAutoConnectEnabled,
-		UnsafeHTTPLAN:     d.cfg.UnsafeHTTPLAN,
+		UnsafeHTTPLAN:                d.cfg.UnsafeHTTPLAN,
 	}
 }

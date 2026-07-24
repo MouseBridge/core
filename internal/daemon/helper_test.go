@@ -12,7 +12,7 @@ import (
 )
 
 func TestHelperRegisterReceivesConfigPush(t *testing.T) {
-	d, err := daemon.New(daemon.Options{DataDir: t.TempDir()})
+	d, err := daemon.New(newTestOptions(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestHelperRegisterReceivesConfigPush(t *testing.T) {
 }
 
 func TestHelperHotkeyProducesBusLogEvent(t *testing.T) {
-	d, err := daemon.New(daemon.Options{DataDir: t.TempDir()})
+	d, err := daemon.New(newTestOptions(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

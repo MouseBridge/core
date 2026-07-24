@@ -6,7 +6,7 @@ import (
 )
 
 func TestSubscribeReceivesEvents(t *testing.T) {
-	d, err := New(Options{DataDir: t.TempDir()})
+	d, err := New(newTestOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestSubscribeReceivesEvents(t *testing.T) {
 }
 
 func TestStartListens(t *testing.T) {
-	d, err := New(Options{DataDir: t.TempDir()})
+	d, err := New(newTestOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}

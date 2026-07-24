@@ -59,18 +59,8 @@ func (s *Server) Stop() {
 func (s *Server) routes(r *gin.Engine) {
 	api := r.Group("/api")
 	api.GET("/status", s.handleStatus)
-	api.GET("/local/helper", s.handleLocalHelperStatus)
-	api.GET("/local/lab", s.handleLocalLabStatus)
-	api.GET("/local/validation", s.handleLocalValidationStatus)
 	api.GET("/events", s.handleSSE)
 	api.POST("/connect", s.handleConnect)
-	api.POST("/local/helper/install", s.handleLocalHelperInstall)
-	api.POST("/local/helper/restart", s.handleLocalHelperRestart)
-	api.POST("/local/helper/open-accessibility", s.handleLocalHelperOpenAccessibility)
-	api.POST("/local/lab/start", s.handleLocalLabStart)
-	api.POST("/local/lab/stop", s.handleLocalLabStop)
-	api.POST("/local/validation/run", s.handleLocalValidationRun)
-	api.POST("/local/validation/stop", s.handleLocalValidationStop)
 	api.DELETE("/sessions/:device_id", s.handleSessionDelete)
 	api.POST("/pair/pin", s.handlePairPIN)
 	api.POST("/pair/reject", s.handlePairReject)
@@ -90,6 +80,21 @@ func (s *Server) routes(r *gin.Engine) {
 	api.POST("/helper/input/batch", s.handleHelperInputBatch)
 	api.POST("/session/input", s.handleSessionInput)
 	api.POST("/session/input/batch", s.handleSessionInputBatch)
+
+	local := api.Group("/local")
+	local.Use(localOnlyMiddleware())
+	local.GET("/status", s.handleLocalStatus)
+	local.GET("/events", s.handleLocalSSE)
+	local.GET("/helper", s.handleLocalHelperStatus)
+	local.GET("/lab", s.handleLocalLabStatus)
+	local.GET("/validation", s.handleLocalValidationStatus)
+	local.POST("/helper/install", s.handleLocalHelperInstall)
+	local.POST("/helper/restart", s.handleLocalHelperRestart)
+	local.POST("/helper/open-accessibility", s.handleLocalHelperOpenAccessibility)
+	local.POST("/lab/start", s.handleLocalLabStart)
+	local.POST("/lab/stop", s.handleLocalLabStop)
+	local.POST("/validation/run", s.handleLocalValidationRun)
+	local.POST("/validation/stop", s.handleLocalValidationStop)
 }
 
 func (s *Server) fanOutEvents() {
@@ -128,6 +133,22 @@ func corsMiddleware() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Headers", "Content-Type")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
+}
+
+func localOnlyMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, apiErr("forbidden", "local access only"))
+			return
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			c.AbortWithStatusJSON(http.StatusForbidden, apiErr("forbidden", "local access only"))
 			return
 		}
 		c.Next()

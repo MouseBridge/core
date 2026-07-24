@@ -386,7 +386,11 @@ func (d *Daemon) emitBus(ev p2p.BusEvent) {
 	d.broadcast(BusEvent(ev))
 	switch ev.Kind {
 	case "pair_request":
-		log.Printf("[daemon] pair_request from %s (pairing_id=%s)", ev.Name, ev.PairingID)
+		if ev.DisplayPIN != "" {
+			log.Printf("[daemon] pair_request from %s (pairing_id=%s pin=%s)", ev.Name, ev.PairingID, ev.DisplayPIN)
+		} else {
+			log.Printf("[daemon] pair_request from %s (pairing_id=%s)", ev.Name, ev.PairingID)
+		}
 	case "paired":
 		log.Printf("[daemon] paired with %s", ev.Name)
 	case "session_connected":

@@ -6,16 +6,22 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 
 - 默认只监听 loopback
 - 如果开启 `unsafe_http_lan=true`，HTTP API 会暴露到局域网，且**没有认证**
+- `GET /api/status` 与 `GET /api/events` 是对外安全视图：不会返回 inbound pairing 的 `display_pin`
+- 需要查看 PIN 时，请使用本机访问的 `/api/local/status` 或 `/api/local/events`
 - Web UI 当前就是基于这些接口工作的
 
 ## 状态与事件
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/api/status` | 读取完整状态快照 |
-| `GET` | `/api/events` | SSE 事件流，首条消息是完整状态快照 |
+| `GET` | `/api/status` | 读取对外安全状态快照（不含 PIN） |
+| `GET` | `/api/events` | 对外安全 SSE 事件流，首条消息是安全状态快照 |
+| `GET` | `/api/local/status` | 仅本机可访问的管理状态快照（含 PIN） |
+| `GET` | `/api/local/events` | 仅本机可访问的管理 SSE 事件流（含 PIN） |
 
 ### `GET /api/status`
+
+这是默认对外状态接口。即使 daemon 开启了 `unsafe_http_lan=true`，它也不会返回 `pending_pairs[].display_pin`。
 
 响应示例：
 
@@ -82,7 +88,7 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 
 ## 本机 helper 托管
 
-这些接口主要给 Web UI 的 `Setup` 页面使用。
+这些接口主要给 Web UI 的 `Server Console` / `Setup` 页面使用，并且**仅允许本机访问**。
 
 | 方法 | 路径 | 请求体 | 说明 |
 |------|------|--------|------|
@@ -93,7 +99,7 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 
 ## 本机 validation suite
 
-这些接口主要给 Web UI 的 `Validation` 页面使用，用于在单机双端模式下跑真实 smoke / anti-loop / batching-latency 验证。
+这些接口主要给 Web UI 的 `Server Console` / `Validation` 页面使用，并且**仅允许本机访问**。
 
 | 方法 | 路径 | 请求体 | 说明 |
 |------|------|--------|------|
@@ -216,3 +222,5 @@ SSE 中 `event` 固定为 `message`，JSON 内容分两类：
 - `session_disconnected`
 - `log`
 - `error`
+
+如果需要在 CLI / 本机调试时看到 PIN，不要依赖 `/api/status`；请查看 daemon 本地日志，或从本机访问 `/api/local/status` / `/api/local/events`。

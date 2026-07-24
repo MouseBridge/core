@@ -22,6 +22,10 @@ func (s *Server) handleStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, s.d.State())
 }
 
+func (s *Server) handleLocalStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, s.d.LocalState())
+}
+
 func (s *Server) handleLocalHelperStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, s.d.LocalHelperStatus())
 }

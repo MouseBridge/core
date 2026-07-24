@@ -14,12 +14,20 @@ import (
 	"time"
 
 	"github.com/mousebridge/core/internal/api"
+	"github.com/mousebridge/core/internal/config"
 	"github.com/mousebridge/core/internal/daemon"
 )
 
 func newTestServer(t *testing.T) (*api.Server, *daemon.Daemon, string) {
 	t.Helper()
-	d, err := daemon.New(daemon.Options{DataDir: t.TempDir()})
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.Default()
+	cfg.Port = reserveTestPort(t)
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatal(err)
+	}
+	d, err := daemon.New(daemon.Options{DataDir: dir, ConfigPath: configPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +47,22 @@ func newTestServer(t *testing.T) (*api.Server, *daemon.Daemon, string) {
 	return srv, d, addr
 }
 
+func reserveTestPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
 func TestStatus(t *testing.T) {
-	_, _, addr := newTestServer(t)
+	_, d, addr := newTestServer(t)
+	entry, err := d.PendingManager().Add("conn-1", "0123456789abcdef0123456789abcdef", "0123456789ab", "Peer Mac", "192.168.1.5:5000")
+	if err != nil {
+		t.Fatal(err)
+	}
 	resp, err := http.Get("http://" + addr + "/api/status")
 	if err != nil {
 		t.Fatal(err)
@@ -71,6 +93,50 @@ func TestStatus(t *testing.T) {
 	}
 	if _, ok := result["capture_enabled"]; !ok {
 		t.Fatal("missing 'capture_enabled' field in status response")
+	}
+	pairs, ok := result["pending_pairs"].([]interface{})
+	if !ok || len(pairs) != 1 {
+		t.Fatalf("pending_pairs=%v want one entry", result["pending_pairs"])
+	}
+	pair, ok := pairs[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("pending_pairs[0]=%T want object", pairs[0])
+	}
+	if _, leaked := pair["display_pin"]; leaked {
+		t.Fatalf("public /api/status leaked display_pin for pairing %s", entry.PairingID)
+	}
+}
+
+func TestLocalStatusIncludesDisplayPIN(t *testing.T) {
+	_, d, addr := newTestServer(t)
+	entry, err := d.PendingManager().Add("conn-1", "0123456789abcdef0123456789abcdef", "0123456789ab", "Peer Mac", "192.168.1.5:5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPIN := d.PendingManager().PIN(entry.PairingID)
+
+	resp, err := http.Get("http://" + addr + "/api/local/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	pairs, ok := result["pending_pairs"].([]interface{})
+	if !ok || len(pairs) != 1 {
+		t.Fatalf("pending_pairs=%v want one entry", result["pending_pairs"])
+	}
+	pair, ok := pairs[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("pending_pairs[0]=%T want object", pairs[0])
+	}
+	if got, _ := pair["display_pin"].(string); got != wantPIN {
+		t.Fatalf("display_pin=%q want %q", got, wantPIN)
 	}
 }
 
@@ -388,7 +454,12 @@ func statusString(status map[string]interface{}, key string) string {
 }
 
 func TestSSEReceivesInitialStatus(t *testing.T) {
-	_, _, addr := newTestServer(t)
+	_, d, addr := newTestServer(t)
+	entry, err := d.PendingManager().Add("conn-1", "0123456789abcdef0123456789abcdef", "0123456789ab", "Peer Mac", "192.168.1.5:5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPIN := d.PendingManager().PIN(entry.PairingID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -421,8 +492,70 @@ func TestSSEReceivesInitialStatus(t *testing.T) {
 		if _, ok := ev["daemon"]; !ok {
 			t.Fatalf("initial SSE event missing 'daemon' field, got: %v", ev)
 		}
+		pairs, ok := ev["pending_pairs"].([]interface{})
+		if !ok || len(pairs) != 1 {
+			t.Fatalf("pending_pairs=%v want one entry", ev["pending_pairs"])
+		}
+		pair, ok := pairs[0].(map[string]interface{})
+		if !ok {
+			t.Fatalf("pending_pairs[0]=%T want object", pairs[0])
+		}
+		if _, leaked := pair["display_pin"]; leaked {
+			t.Fatalf("public SSE leaked display_pin, want redacted (pin=%s)", wantPIN)
+		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for initial SSE status event")
+	}
+}
+
+func TestLocalSSEReceivesInitialStatusWithDisplayPIN(t *testing.T) {
+	_, d, addr := newTestServer(t)
+	entry, err := d.PendingManager().Add("conn-1", "0123456789abcdef0123456789abcdef", "0123456789ab", "Peer Mac", "192.168.1.5:5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPIN := d.PendingManager().PIN(entry.PairingID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	lines := make(chan string, 10)
+	go func() {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/api/local/events", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			if line := scanner.Text(); strings.HasPrefix(line, "data:") {
+				lines <- line
+				return
+			}
+		}
+	}()
+
+	select {
+	case line := <-lines:
+		jsonPart := strings.TrimPrefix(strings.TrimPrefix(line, "data: "), "data:")
+		var ev map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonPart), &ev); err != nil {
+			t.Fatalf("parse SSE JSON %q: %v", line, err)
+		}
+		pairs, ok := ev["pending_pairs"].([]interface{})
+		if !ok || len(pairs) != 1 {
+			t.Fatalf("pending_pairs=%v want one entry", ev["pending_pairs"])
+		}
+		pair, ok := pairs[0].(map[string]interface{})
+		if !ok {
+			t.Fatalf("pending_pairs[0]=%T want object", pairs[0])
+		}
+		if got, _ := pair["display_pin"].(string); got != wantPIN {
+			t.Fatalf("display_pin=%q want %q", got, wantPIN)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for initial local SSE status event")
 	}
 }
 

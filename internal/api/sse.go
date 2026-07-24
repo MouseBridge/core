@@ -48,6 +48,14 @@ func (h *sseHub) broadcast(ev daemon.BusEvent) {
 }
 
 func (s *Server) handleSSE(c *gin.Context) {
+	s.handleSSEView(c, false)
+}
+
+func (s *Server) handleLocalSSE(c *gin.Context) {
+	s.handleSSEView(c, true)
+}
+
+func (s *Server) handleSSEView(c *gin.Context, includeSensitive bool) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("X-Accel-Buffering", "no")
 
@@ -56,7 +64,12 @@ func (s *Server) handleSSE(c *gin.Context) {
 	defer s.hub.remove(ch)
 
 	// Push full status immediately on connect.
-	snap := s.d.State()
+	var snap any
+	if includeSensitive {
+		snap = s.d.LocalState()
+	} else {
+		snap = s.d.State()
+	}
 	log.Printf("api: SSE client connected from %s", c.Request.RemoteAddr)
 
 	firstSent := false
@@ -71,6 +84,9 @@ func (s *Server) handleSSE(c *gin.Context) {
 			if !ok {
 				return false
 			}
+			if !includeSensitive {
+				ev = redactBusEvent(ev)
+			}
 			c.SSEvent("message", ev)
 			return true
 		case <-c.Request.Context().Done():
@@ -79,4 +95,12 @@ func (s *Server) handleSSE(c *gin.Context) {
 	})
 
 	log.Printf("api: SSE client disconnected from %s", c.Request.RemoteAddr)
+}
+
+func redactBusEvent(ev daemon.BusEvent) daemon.BusEvent {
+	if ev.Kind != "pair_request" || ev.DisplayPIN == "" {
+		return ev
+	}
+	ev.DisplayPIN = ""
+	return ev
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func TestDaemonStartStop(t *testing.T) {
-	d, err := daemon.New(daemon.Options{DataDir: t.TempDir()})
+	d, err := daemon.New(newTestOptions(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestDaemonStartStop(t *testing.T) {
 }
 
 func TestDaemonSubscribeBroadcast(t *testing.T) {
-	d, err := daemon.New(daemon.Options{DataDir: t.TempDir()})
+	d, err := daemon.New(newTestOptions(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

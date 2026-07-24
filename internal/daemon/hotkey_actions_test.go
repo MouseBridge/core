@@ -7,7 +7,7 @@ import (
 )
 
 func TestHelperHotkeySwitchNextUpdatesActiveTarget(t *testing.T) {
-	d, err := New(Options{DataDir: t.TempDir()})
+	d, err := New(newTestOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestHelperHotkeySwitchNextUpdatesActiveTarget(t *testing.T) {
 }
 
 func TestHelperHotkeyTogglePauseUpdatesSnapshot(t *testing.T) {
-	d, err := New(Options{DataDir: t.TempDir()})
+	d, err := New(newTestOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestHelperHotkeyTogglePauseUpdatesSnapshot(t *testing.T) {
 }
 
 func TestHelperEdgeSwitchUpdatesActiveTarget(t *testing.T) {
-	d, err := New(Options{DataDir: t.TempDir()})
+	d, err := New(newTestOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestHelperEdgeSwitchUpdatesActiveTarget(t *testing.T) {
 }
 
 func TestHelperEdgeSwitchIgnoresUnknownTarget(t *testing.T) {
-	d, err := New(Options{DataDir: t.TempDir()})
+	d, err := New(newTestOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
