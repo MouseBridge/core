@@ -41,6 +41,6 @@ mousebridge daemon --connect 192.168.1.25
 
 ## 相关入口
 
-- Web UI：见 `ui-web/README.md`
+- Web UI：见 `ui-web-client/README.md` 与 `ui-web-server/README.md`
 - HTTP API：见 [http-api.md](http-api.md)
 - Helper 管理：见 `../helper/README.md`
