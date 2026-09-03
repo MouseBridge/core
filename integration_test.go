@@ -95,7 +95,9 @@ waitPairRequest:
 	t.Logf("PASS: both sides got pair_request pairingID=%s pin=%s", pairingID, pin)
 
 	// Check server status has pending_pair with display_pin
-	snap1 := d1.State()
+	// The PIN is intentionally only exposed by the local-admin surface. The
+	// public State view redacts it for LAN callers.
+	snap1 := d1.LocalState()
 	if len(snap1.PendingPairs) == 0 {
 		t.Fatal("server pending_pairs empty")
 	}
@@ -134,7 +136,7 @@ waitRetry:
 	t.Logf("PASS: pair_retry received (attempts_remaining=2)")
 
 	// Check server status updated attempts
-	snap1b := d1.State()
+	snap1b := d1.LocalState()
 	if len(snap1b.PendingPairs) == 0 {
 		t.Fatal("server pending_pairs empty after wrong pin")
 	}
@@ -367,10 +369,10 @@ func TestRememberedConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 			id := fmt.Sprintf("%032x", i) // 32 hex chars
 			store.Add(remembered.Record{
-				DeviceID:  id,
-				DisplayID: id[:12],
-				Name:      fmt.Sprintf("device-%d", i),
-				SecretID:  "sid",
+				DeviceID:   id,
+				DisplayID:  id[:12],
+				Name:       fmt.Sprintf("device-%d", i),
+				SecretID:   "sid",
 				PairSecret: "secret",
 				CreatedAt:  time.Now(),
 				LastSeenAt: time.Now(),
