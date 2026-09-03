@@ -258,6 +258,7 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 			var challenge event.PairChallengePayload
 			_ = event.DecodePayload(reply, &challenge)
 			pairingID = challenge.PairingID
+			expiresAt := time.Now().Add(2 * time.Minute)
 
 			// Register in tracker BEFORE emitting pair_request so SendPIN can immediately
 			// find the connection when the UI/test reacts to the event.
@@ -267,7 +268,7 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 					ConnectionID:    connID,
 					RemoteName:      serverName,
 					RemoteDisplayID: serverID[:12],
-					ExpiresAt:       time.Now().Add(2 * time.Minute),
+					ExpiresAt:       expiresAt,
 					Conn:            c,
 				})
 				defer tracker.Remove(pairingID)
@@ -277,6 +278,7 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 				Kind: "pair_request", PairingID: pairingID, ConnectionID: connID,
 				ClaimedDeviceID: serverID, DisplayID: serverID[:12], Name: serverName,
 				RemoteIP: c.RemoteAddr().String(), Role: "client",
+				AttemptsRemaining: 3, ExpiresAt: expiresAt.Unix(),
 			})
 			log.Printf("[p2p] pairing with %s — enter PIN shown on remote device", serverName)
 		case event.TypePairReject:

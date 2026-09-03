@@ -35,6 +35,7 @@ type BusEvent struct {
 	Name              string `json:"name,omitempty"`
 	RemoteIP          string `json:"remote_ip,omitempty"`
 	AttemptsRemaining int    `json:"attempts_remaining,omitempty"`
+	ExpiresAt         int64  `json:"expires_at,omitempty"`
 	Remembered        bool   `json:"remembered,omitempty"`
 
 	DeviceID   string `json:"device_id,omitempty"`
@@ -149,6 +150,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 		Kind: "pair_request", PairingID: pairingID, ConnectionID: connID,
 		ClaimedDeviceID: claimedID, DisplayID: peerDisplayID, Name: peerName,
 		RemoteIP: remoteAddr, AttemptsRemaining: entry.MaxAttempts,
+		ExpiresAt:  entry.ExpiresAt.Unix(),
 		DisplayPIN: pin, Role: "server",
 	})
 	log.Printf("[p2p] pair_request from %s (%s) — PIN: %s", peerName, claimedID[:12], pin)
