@@ -162,6 +162,9 @@ func recommendedAction(status Status) string {
 	case !status.ExecutableFound:
 		return actionInstallHelperBinary
 	case !status.LaunchAgentInstalled:
+		if strings.TrimSpace(os.Getenv("MB_HELPER_APP_MANAGED")) == "1" && status.AccessibilityGranted && status.Connected {
+			return actionReady
+		}
 		return actionInstallLaunchAgent
 	case !status.AccessibilityGranted:
 		return actionGrantAccessibility
