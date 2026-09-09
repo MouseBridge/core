@@ -86,7 +86,10 @@ wait_for_pin() {
   local url="$1"
   for _ in {1..50}; do
     local pin
-    pin="$(json_get "$url/api/status" | extract_pin)"
+    # The public status surface intentionally redacts the PIN when LAN HTTP
+    # access is enabled. This verifier runs locally, so use the local status
+    # surface that is allowed to expose the receiver PIN.
+    pin="$(json_get "$url/api/local/status" | extract_pin)"
     if [[ -n "$pin" ]]; then
       echo "$pin"
       return 0

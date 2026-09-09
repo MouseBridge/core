@@ -115,7 +115,6 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 								Payload: event.PairAcceptPayload{Remembered: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret},
 							})
 							_ = rem.UpdateLastSeen(claimedID, time.Now())
-							emit(BusEvent{Kind: "session_connected", DeviceID: claimedID, DisplayID: peerDisplayID, Name: peerName, RemoteIP: remoteAddr, Role: "server"})
 							log.Printf("[p2p] remembered device %s (%s) authenticated and auto-connected", peerName, claimedID[:12])
 							adopted = true
 							go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
@@ -176,7 +175,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 			// Pairing success.
 			var accepted event.PairAcceptPayload
 			if h.RememberedEnabled() {
-				rec, saveErr := buildAndSaveRemembered(claimedID, peerDisplayID, peerName, rem)
+				rec, saveErr := buildAndSaveRemembered(claimedID, peerDisplayID, peerName, remoteAddr, rem)
 				if saveErr == nil {
 					accepted = event.PairAcceptPayload{Remembered: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret}
 				} else {
@@ -222,7 +221,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 	}
 }
 
-func buildAndSaveRemembered(deviceID, displayID, name string, rem *remembered.Store) (remembered.Record, error) {
+func buildAndSaveRemembered(deviceID, displayID, name, endpoint string, rem *remembered.Store) (remembered.Record, error) {
 	secretID, err := randomHex16()
 	if err != nil {
 		return remembered.Record{}, err
@@ -240,6 +239,7 @@ func buildAndSaveRemembered(deviceID, displayID, name string, rem *remembered.St
 		PairSecret: pairSecret,
 		CreatedAt:  now,
 		LastSeenAt: now,
+		Endpoint:   endpoint,
 	}
 	return rec, rem.Add(rec)
 }

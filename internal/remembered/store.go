@@ -21,6 +21,7 @@ type Record struct {
 	TrustedAutoConnect bool      `json:"trusted_auto_connect"`
 	CreatedAt          time.Time `json:"created_at"`
 	LastSeenAt         time.Time `json:"last_seen_at"`
+	Endpoint           string    `json:"endpoint,omitempty"`
 }
 
 // DTO is the API/SSE-safe view; never contains pair_secret or secret_id.
@@ -32,6 +33,7 @@ type DTO struct {
 	TrustedAutoConnect bool   `json:"trusted_auto_connect"`
 	CreatedAt          int64  `json:"created_at"`
 	LastSeenAt         int64  `json:"last_seen_at"`
+	Endpoint           string `json:"endpoint,omitempty"`
 }
 
 func toDTO(r Record) DTO {
@@ -43,6 +45,7 @@ func toDTO(r Record) DTO {
 		TrustedAutoConnect: r.TrustedAutoConnect,
 		CreatedAt:          r.CreatedAt.Unix(),
 		LastSeenAt:         r.LastSeenAt.Unix(),
+		Endpoint:           r.Endpoint,
 	}
 }
 
@@ -159,6 +162,29 @@ func (s *Store) UpdateLastSeen(deviceID string, t time.Time) error {
 	}
 	next := cloneMap(s.records)
 	rec.LastSeenAt = t
+	next[deviceID] = rec
+	err := s.persist(next)
+	if err == nil {
+		s.records = next
+	}
+	s.mu.Unlock()
+	return err
+}
+
+// UpdateEndpoint records the last known network endpoint for a device. Older
+// remembered.json files simply have an empty endpoint and remain compatible.
+func (s *Store) UpdateEndpoint(deviceID, endpoint string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	s.mu.Lock()
+	rec, ok := s.records[deviceID]
+	if !ok {
+		s.mu.Unlock()
+		return nil
+	}
+	next := cloneMap(s.records)
+	rec.Endpoint = endpoint
 	next[deviceID] = rec
 	err := s.persist(next)
 	if err == nil {

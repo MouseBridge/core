@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -65,6 +66,12 @@ type Daemon struct {
 	subsMu sync.RWMutex
 	subs   map[chan BusEvent]struct{}
 
+	reconnectMu       sync.Mutex
+	reconnectTimers   map[string]*time.Timer
+	reconnectAttempts map[string]int
+	manualDisconnect  map[string]bool
+	stopping          bool
+
 	// httpConnCh receives raw HTTP connections from the MUX.
 	httpConnCh chan net.Conn
 
@@ -119,18 +126,21 @@ func New(opts Options) (*Daemon, error) {
 	pm := pending.New(ttl, cfg.PairingPINMaxAttempts)
 
 	d := &Daemon{
-		configPath:     opts.ConfigPath,
-		dataDir:        opts.DataDir,
-		cfg:            cfg,
-		identity:       identity,
-		rem:            rem,
-		pending:        pm,
-		tracker:        p2p.NewOutboundTracker(),
-		sessions:       make(map[string]*sessionEntry),
-		conns:          make(map[*transport.Conn]string),
-		subs:           make(map[chan BusEvent]struct{}),
-		httpConnCh:     make(chan net.Conn, 64),
-		captureEnabled: true,
+		configPath:        opts.ConfigPath,
+		dataDir:           opts.DataDir,
+		cfg:               cfg,
+		identity:          identity,
+		rem:               rem,
+		pending:           pm,
+		tracker:           p2p.NewOutboundTracker(),
+		sessions:          make(map[string]*sessionEntry),
+		conns:             make(map[*transport.Conn]string),
+		subs:              make(map[chan BusEvent]struct{}),
+		reconnectTimers:   make(map[string]*time.Timer),
+		reconnectAttempts: make(map[string]int),
+		manualDisconnect:  make(map[string]bool),
+		httpConnCh:        make(chan net.Conn, 64),
+		captureEnabled:    true,
 	}
 	d.ctrl = switch_.NewController(identity.DeviceID)
 	d.ctrl.OnSwitch = d.handleSwitchEvent
@@ -163,6 +173,9 @@ func ensureConfigFile(configPath string, cfg *config.Config) error {
 
 // Start begins listening on listen_host:port and starts background goroutines.
 func (d *Daemon) Start() error {
+	d.reconnectMu.Lock()
+	d.stopping = false
+	d.reconnectMu.Unlock()
 	if err := d.helper.Start(); err != nil {
 		return err
 	}
@@ -200,6 +213,18 @@ func (d *Daemon) Start() error {
 
 // Stop shuts down the daemon.
 func (d *Daemon) Stop() {
+	d.reconnectMu.Lock()
+	d.stopping = true
+	for deviceID := range d.reconnectTimers {
+		d.reconnectTimers[deviceID].Stop()
+		delete(d.reconnectTimers, deviceID)
+	}
+	d.sessMu.RLock()
+	for _, session := range d.sessions {
+		d.manualDisconnect[session.DeviceID] = true
+	}
+	d.sessMu.RUnlock()
+	d.reconnectMu.Unlock()
 	if d.cancel != nil {
 		d.cancel()
 	}
@@ -342,6 +367,7 @@ func (d *Daemon) DisconnectDevice(deviceID string) error {
 	if target == nil {
 		return fmt.Errorf("no active session for device %q", deviceID)
 	}
+	d.markManualDisconnect(deviceID)
 	return target.Close()
 }
 
@@ -394,9 +420,13 @@ func (d *Daemon) emitBus(ev p2p.BusEvent) {
 	case "paired":
 		log.Printf("[daemon] paired with %s", ev.Name)
 	case "session_connected":
+		d.clearReconnect(ev.DeviceID)
 		log.Printf("[daemon] session connected: %s (%s) role=%s", ev.Name, ev.DeviceID[:12], ev.Role)
 	case "session_disconnected":
 		log.Printf("[daemon] session disconnected: %s", ev.Name)
+		if ev.Role == "client" && !d.consumeManualDisconnect(ev.DeviceID) {
+			d.scheduleReconnect(ev.DeviceID)
+		}
 	case "error":
 		log.Printf("[daemon] error: %s", ev.Msg)
 	}
@@ -424,17 +454,13 @@ func (d *Daemon) Unsubscribe(ch chan BusEvent) {
 
 func (d *Daemon) broadcast(ev BusEvent) {
 	d.subsMu.RLock()
-	subs := make([]chan BusEvent, 0, len(d.subs))
 	for ch := range d.subs {
-		subs = append(subs, ch)
-	}
-	d.subsMu.RUnlock()
-	for _, ch := range subs {
 		select {
 		case ch <- ev:
 		default:
 		}
 	}
+	d.subsMu.RUnlock()
 }
 
 // Addr returns the listener address (empty if not listening).
@@ -853,10 +879,17 @@ func (d *Daemon) togglePause() {
 func (d *Daemon) disconnectAll() {
 	d.connsMu.Lock()
 	conns := make([]*transport.Conn, 0, len(d.conns))
-	for c := range d.conns {
+	devices := make([]string, 0, len(d.conns))
+	for c, deviceID := range d.conns {
 		conns = append(conns, c)
+		if deviceID != "" {
+			devices = append(devices, deviceID)
+		}
 	}
 	d.connsMu.Unlock()
+	for _, deviceID := range devices {
+		d.markManualDisconnect(deviceID)
+	}
 
 	for _, c := range conns {
 		_ = c.Close()
@@ -864,6 +897,106 @@ func (d *Daemon) disconnectAll() {
 	if d.helper != nil {
 		d.helper.BroadcastConfig()
 	}
+}
+
+const maxAutoReconnectAttempts = 5
+
+func (d *Daemon) markManualDisconnect(deviceID string) {
+	d.reconnectMu.Lock()
+	d.manualDisconnect[deviceID] = true
+	d.reconnectMu.Unlock()
+}
+
+func (d *Daemon) consumeManualDisconnect(deviceID string) bool {
+	d.reconnectMu.Lock()
+	defer d.reconnectMu.Unlock()
+	manual := d.manualDisconnect[deviceID]
+	delete(d.manualDisconnect, deviceID)
+	return manual
+}
+
+func (d *Daemon) clearReconnect(deviceID string) {
+	d.reconnectMu.Lock()
+	if timer := d.reconnectTimers[deviceID]; timer != nil {
+		timer.Stop()
+		delete(d.reconnectTimers, deviceID)
+	}
+	delete(d.reconnectAttempts, deviceID)
+	delete(d.manualDisconnect, deviceID)
+	d.reconnectMu.Unlock()
+}
+
+func (d *Daemon) hasSession(deviceID string) bool {
+	d.sessMu.RLock()
+	defer d.sessMu.RUnlock()
+	for _, session := range d.sessions {
+		if session.DeviceID == deviceID {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Daemon) hasPendingPair(displayID string) bool {
+	for _, pairing := range d.tracker.Snapshot() {
+		if pairing.RemoteDisplayID == displayID {
+			return true
+		}
+	}
+	return false
+}
+
+// scheduleReconnect retries only trusted client sessions. If the remote side
+// no longer trusts this device, DialAndPair leaves an outbound PIN request in
+// the tracker and this loop stops, allowing the normal PIN fallback UI.
+func (d *Daemon) scheduleReconnect(deviceID string) {
+	rec, ok := d.rem.Get(deviceID)
+	if !ok || !rec.TrustedAutoConnect || !d.cfg.RememberedAutoConnectEnabled || rec.Endpoint == "" {
+		return
+	}
+	host, port, err := net.SplitHostPort(rec.Endpoint)
+	if err != nil || host == "" || port == "" {
+		return
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return
+	}
+
+	d.reconnectMu.Lock()
+	if d.stopping || d.reconnectTimers[deviceID] != nil || d.hasSession(deviceID) {
+		d.reconnectMu.Unlock()
+		return
+	}
+	attempt := d.reconnectAttempts[deviceID]
+	if attempt >= maxAutoReconnectAttempts {
+		d.reconnectMu.Unlock()
+		d.broadcast(BusEvent{Kind: "error", DeviceID: deviceID, Msg: "trusted reconnect stopped after repeated failures; use Reconnect to try again"})
+		return
+	}
+	d.reconnectAttempts[deviceID] = attempt + 1
+	delay := time.Duration(1<<attempt) * time.Second
+	d.reconnectTimers[deviceID] = time.AfterFunc(delay, func() {
+		d.reconnectMu.Lock()
+		delete(d.reconnectTimers, deviceID)
+		stopping := d.stopping
+		d.reconnectMu.Unlock()
+		if stopping || d.hasSession(deviceID) {
+			return
+		}
+		c, dialErr := transport.DialTimeout(host, portNumber, time.Duration(d.cfg.ConnectTimeoutSeconds)*time.Second)
+		if dialErr != nil {
+			d.broadcast(BusEvent{Kind: "error", DeviceID: deviceID, Msg: "trusted reconnect: " + dialErr.Error()})
+			d.scheduleReconnect(deviceID)
+			return
+		}
+		p2p.DialAndPair(c, d.identity.DeviceID, d.identity.DisplayID, d.identity.Name, d, d.tracker, d.rem, d.emitBus)
+		if d.hasSession(deviceID) || d.hasPendingPair(rec.DisplayID) {
+			return
+		}
+		d.scheduleReconnect(deviceID)
+	})
+	d.reconnectMu.Unlock()
 }
 
 func (d *Daemon) switchRelative(step int) {

@@ -48,8 +48,8 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 	for {
 		msg, err := c.Recv()
 		if err != nil {
-			emit(BusEvent{Kind: "session_disconnected", DeviceID: deviceID, Name: name})
 			h.SessionRemove(connID)
+			emit(BusEvent{Kind: "session_disconnected", DeviceID: deviceID, Name: name, Role: role})
 			return
 		}
 		latency := float64(time.Now().UnixMilli() - msg.Ts)
@@ -211,6 +211,7 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 			if pairingID == "" && pay.Remembered {
 				if remStore != nil {
 					_ = remStore.UpdateLastSeen(serverID, time.Now())
+					_ = remStore.UpdateEndpoint(serverID, c.RemoteAddr().String())
 				}
 				adopted = true
 				go RunSession(c, serverID, serverName, "client", h, emit)
@@ -229,6 +230,7 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 						PairSecret: pay.PairSecret,
 						CreatedAt:  now,
 						LastSeenAt: now,
+						Endpoint:   c.RemoteAddr().String(),
 					})
 				}
 			}
