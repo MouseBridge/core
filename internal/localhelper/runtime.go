@@ -109,6 +109,9 @@ func (r *Runtime) Status() Status {
 
 // Install installs or refreshes the helper LaunchAgent.
 func (r *Runtime) Install() error {
+	if strings.TrimSpace(os.Getenv("MB_HELPER_APP_MANAGED")) == "1" {
+		return fmt.Errorf("local helper is managed by the desktop app; restart the desktop app services instead")
+	}
 	program, found, err := lookupProgram()
 	if err != nil {
 		return err

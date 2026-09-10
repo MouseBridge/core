@@ -27,6 +27,14 @@ func TestStatusUsesConnectedHelperAsAccessibilitySourceOfTruth(t *testing.T) {
 	}
 }
 
+func TestInstallDoesNotCreateLaunchAgentForAppManagedRuntime(t *testing.T) {
+	t.Setenv("MB_HELPER_APP_MANAGED", "1")
+	runtime := NewRuntime(t.TempDir(), nil)
+	if err := runtime.Install(); err == nil {
+		t.Fatal("app-managed runtime must not install a LaunchAgent")
+	}
+}
+
 func TestDefaultLaunchAgentLabelIsStableForRelativeAndAbsoluteDataDir(t *testing.T) {
 	dir, err := os.MkdirTemp(".", "mb-runtime-*")
 	if err != nil {
