@@ -143,6 +143,15 @@ func (r *Runtime) OpenAccessibility() error {
 	if !found {
 		return fmt.Errorf("mousebridge-helper executable not found")
 	}
+	// Ask macOS about this exact helper first. This is deliberately only
+	// reachable from the explicit UI retry button; normal status checks use
+	// check-accessibility and never trigger a prompt on startup.
+	requestOutput, requestErr := run(program, "request-accessibility")
+	if requestErr == nil && strings.Contains(requestOutput, "Accessibility permission: granted") {
+		return nil
+	}
+	// Keep the settings fallback for older helper builds and systems where the
+	// prompt API cannot open the Privacy & Security pane by itself.
 	_, err = run(program, "open-accessibility")
 	return err
 }
