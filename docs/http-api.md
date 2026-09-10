@@ -40,6 +40,7 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
   "helper_runtime": {
     "executable_found": true,
     "executable_path": "/usr/local/bin/mousebridge-helper",
+    "permission_path": "/Applications/MouseBridge.app/Contents/Resources/bin/MouseBridge Helper.app",
     "launch_agent_label": "com.mousebridge.helper.abcd1234",
     "launch_agent_plist": "/Users/name/Library/LaunchAgents/com.mousebridge.helper.abcd1234.plist",
     "launch_agent_installed": true,

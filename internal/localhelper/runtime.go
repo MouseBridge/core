@@ -24,6 +24,7 @@ const (
 type Status struct {
 	ExecutableFound      bool   `json:"executable_found"`
 	ExecutablePath       string `json:"executable_path,omitempty"`
+	PermissionPath       string `json:"permission_path,omitempty"`
 	LaunchAgentLabel     string `json:"launch_agent_label"`
 	LaunchAgentPlist     string `json:"launch_agent_plist"`
 	LaunchAgentInstalled bool   `json:"launch_agent_installed"`
@@ -80,6 +81,10 @@ func (r *Runtime) Status() Status {
 
 	program, found, lookupErr := lookupProgram()
 	status.ExecutablePath = program
+	status.PermissionPath = strings.TrimSpace(os.Getenv("MB_HELPER_BUNDLE"))
+	if status.PermissionPath == "" {
+		status.PermissionPath = program
+	}
 	status.ExecutableFound = found
 	if lookupErr != nil {
 		status.LastError = lookupErr.Error()
