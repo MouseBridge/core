@@ -6,6 +6,27 @@ import (
 	"testing"
 )
 
+func TestStatusUsesConnectedHelperAsAccessibilitySourceOfTruth(t *testing.T) {
+	dir := t.TempDir()
+	program := filepath.Join(dir, "helper-check")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\necho 'Accessibility permission: not granted'\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MB_HELPER_PROGRAM", program)
+
+	runtime := NewRuntime(dir, func() int { return 1 })
+	status := runtime.Status()
+	if !status.Connected {
+		t.Fatal("expected connected helper")
+	}
+	if !status.AccessibilityGranted {
+		t.Fatal("a connected helper must be reported as accessibility-ready")
+	}
+	if status.RecommendedAction == actionGrantAccessibility {
+		t.Fatalf("connected helper must not request accessibility again: %+v", status)
+	}
+}
+
 func TestDefaultLaunchAgentLabelIsStableForRelativeAndAbsoluteDataDir(t *testing.T) {
 	dir, err := os.MkdirTemp(".", "mb-runtime-*")
 	if err != nil {

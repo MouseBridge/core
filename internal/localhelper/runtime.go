@@ -68,6 +68,14 @@ func (r *Runtime) Status() Status {
 	if r.clientCountFn != nil {
 		status.ClientCount = r.clientCountFn()
 		status.Connected = status.ClientCount > 0
+		// A connected helper has already passed AXIsProcessTrusted and created
+		// its event tap. Prefer this live signal over a second short-lived CLI
+		// process when macOS reports different TCC results for the two launch
+		// contexts. The live helper is the process that actually performs input
+		// capture, so it is the authoritative readiness signal.
+		if status.Connected {
+			status.AccessibilityGranted = true
+		}
 	}
 
 	program, found, lookupErr := lookupProgram()
@@ -81,8 +89,8 @@ func (r *Runtime) Status() Status {
 
 	if status.ExecutableFound {
 		granted, err := checkAccessibility(program)
-		status.AccessibilityGranted = granted
-		if err != nil && status.LastError == "" {
+		status.AccessibilityGranted = granted || status.Connected
+		if err != nil && status.LastError == "" && !status.Connected {
 			status.LastError = err.Error()
 		}
 	}
