@@ -35,6 +35,21 @@ func TestInstallDoesNotCreateLaunchAgentForAppManagedRuntime(t *testing.T) {
 	}
 }
 
+func TestAppManagedConnectedRuntimeIsReadyWithoutLaunchAgent(t *testing.T) {
+	dir := t.TempDir()
+	program := filepath.Join(dir, "helper-check")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\necho 'Accessibility permission: not granted'\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MB_HELPER_PROGRAM", program)
+	t.Setenv("MB_HELPER_APP_MANAGED", "1")
+
+	status := NewRuntime(dir, func() int { return 1 }).Status()
+	if status.RecommendedAction != actionReady {
+		t.Fatalf("connected app-managed runtime should be ready without LaunchAgent, got %q", status.RecommendedAction)
+	}
+}
+
 func TestAppManagedRuntimeReportsPermissionBeforeLaunchAgent(t *testing.T) {
 	dir := t.TempDir()
 	program := filepath.Join(dir, "helper-check")

@@ -18,6 +18,7 @@ const (
 	actionInstallHelperBinary = "install_helper_binary"
 	actionInstallLaunchAgent  = "install_launch_agent"
 	actionGrantAccessibility  = "grant_accessibility"
+	actionRestartLocalService = "restart_local_service"
 	actionRestartLaunchAgent  = "restart_launch_agent"
 )
 
@@ -194,12 +195,16 @@ func recommendedAction(status Status) string {
 	case !status.ExecutableFound:
 		return actionInstallHelperBinary
 	case appManaged && !status.AccessibilityGranted:
-		// App-managed mode intentionally has no LaunchAgent. Permission must
-		// be resolved before reporting the helper as ready or asking the user
-		// to install an unrelated background job.
+		// App-managed mode owns its temporary LaunchAgent internally. Permission
+		// must be resolved before reporting the helper as ready or asking the user
+		// to restart a local service.
 		return actionGrantAccessibility
 	case appManaged && !status.Connected:
-		return actionRestartLaunchAgent
+		return actionRestartLocalService
+	case appManaged:
+		// The desktop app owns the helper lifecycle. A connected helper is
+		// ready even though no LaunchAgent exists by design.
+		return actionReady
 	case !status.LaunchAgentInstalled:
 		return actionInstallLaunchAgent
 	case !status.AccessibilityGranted:
