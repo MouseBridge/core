@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -146,10 +147,15 @@ func (r *Runtime) OpenAccessibility() error {
 	// Ask macOS about this exact helper first. This is deliberately only
 	// reachable from the explicit UI retry button; normal status checks use
 	// check-accessibility and never trigger a prompt on startup.
-	requestOutput, requestErr := run(program, "request-accessibility")
-	if requestErr == nil && strings.Contains(requestOutput, "Accessibility permission: granted") {
-		return nil
+	request := exec.Command(program, "request-accessibility")
+	request.Stdout = io.Discard
+	request.Stderr = io.Discard
+	if err := request.Start(); err == nil {
+		// Keep the process alive while the user clicks the system prompt. Waiting
+		// here would block the HTTP request/UI for the whole permission timeout.
+		go func() { _ = request.Wait() }()
 	}
+
 	// Keep the settings fallback for older helper builds and systems where the
 	// prompt API cannot open the Privacy & Security pane by itself.
 	_, err = run(program, "open-accessibility")
