@@ -35,6 +35,21 @@ func TestInstallDoesNotCreateLaunchAgentForAppManagedRuntime(t *testing.T) {
 	}
 }
 
+func TestAppManagedRuntimeReportsPermissionBeforeLaunchAgent(t *testing.T) {
+	dir := t.TempDir()
+	program := filepath.Join(dir, "helper-check")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\necho 'Accessibility permission: not granted'\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MB_HELPER_PROGRAM", program)
+	t.Setenv("MB_HELPER_APP_MANAGED", "1")
+
+	status := NewRuntime(dir, nil).Status()
+	if status.RecommendedAction != actionGrantAccessibility {
+		t.Fatalf("app-managed runtime should request permission, got %q", status.RecommendedAction)
+	}
+}
+
 func TestDefaultLaunchAgentLabelIsStableForRelativeAndAbsoluteDataDir(t *testing.T) {
 	dir, err := os.MkdirTemp(".", "mb-runtime-*")
 	if err != nil {

@@ -183,13 +183,18 @@ func lookupProgram() (string, bool, error) {
 }
 
 func recommendedAction(status Status) string {
+	appManaged := strings.TrimSpace(os.Getenv("MB_HELPER_APP_MANAGED")) == "1"
 	switch {
 	case !status.ExecutableFound:
 		return actionInstallHelperBinary
+	case appManaged && !status.AccessibilityGranted:
+		// App-managed mode intentionally has no LaunchAgent. Permission must
+		// be resolved before reporting the helper as ready or asking the user
+		// to install an unrelated background job.
+		return actionGrantAccessibility
+	case appManaged && !status.Connected:
+		return actionRestartLaunchAgent
 	case !status.LaunchAgentInstalled:
-		if strings.TrimSpace(os.Getenv("MB_HELPER_APP_MANAGED")) == "1" && status.AccessibilityGranted && status.Connected {
-			return actionReady
-		}
 		return actionInstallLaunchAgent
 	case !status.AccessibilityGranted:
 		return actionGrantAccessibility
