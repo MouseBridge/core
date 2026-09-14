@@ -105,7 +105,7 @@ func TestHandleInboundRememberedDeviceRequiresPINWhenAutoConnectDisabled(t *test
 	}
 	if err := clientConn.Send(event.Message{
 		V: 1, Seq: 3, Type: event.TypePairApprove, Ts: time.Now().UnixMilli(),
-		Payload: event.PairConfirmPayload{PairingID: request.PairingID},
+		Payload: event.PairConfirmPayload{PairingID: request.PairingID, Trusted: false},
 	}); err != nil {
 		t.Fatalf("Send pair_approve: %v", err)
 	}
@@ -120,12 +120,12 @@ func TestHandleInboundRememberedDeviceRequiresPINWhenAutoConnectDisabled(t *test
 	if err := event.DecodePayload(accepted, &acceptedPayload); err != nil {
 		t.Fatalf("DecodePayload(pair_accept): %v", err)
 	}
-	if !acceptedPayload.Remembered || !acceptedPayload.Trusted {
-		t.Fatalf("pair approval should create a trusted remembered device: %+v", acceptedPayload)
+	if !acceptedPayload.Remembered || acceptedPayload.Trusted {
+		t.Fatalf("one-time pair approval should not create a trusted device: %+v", acceptedPayload)
 	}
 	record, ok := rem.Get(clientID)
-	if !ok || !record.TrustedAutoConnect {
-		t.Fatalf("server did not persist trusted remembered device: ok=%t record=%+v", ok, record)
+	if !ok || record.TrustedAutoConnect {
+		t.Fatalf("server did not persist one-time remembered device: ok=%t record=%+v", ok, record)
 	}
 }
 

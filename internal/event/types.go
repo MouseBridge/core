@@ -54,10 +54,11 @@ type PairChallengePayload struct {
 	ServerName string `json:"server_name"`
 }
 
-// PairConfirmPayload carries the PIN entered by the client (host).
+// PairConfirmPayload carries either the client PIN or a receiver approval.
 type PairConfirmPayload struct {
 	PairingID string `json:"pairing_id"`
 	PIN       string `json:"pin"`
+	Trusted   bool   `json:"trusted,omitempty"`
 }
 
 // PairAcceptPayload is sent by server on successful pairing.

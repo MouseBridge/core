@@ -162,12 +162,19 @@ func (s *Server) handlePairReject(c *gin.Context) {
 func (s *Server) handlePairApprove(c *gin.Context) {
 	var req struct {
 		PairingID string `json:"pairing_id"`
+		Trusted   *bool  `json:"trusted"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.PairingID == "" {
 		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "pairing_id is required"))
 		return
 	}
-	if err := s.d.ApproveInbound(req.PairingID); err != nil {
+	// Omitted trusted keeps backward compatibility with older clients, whose
+	// only approval action meant permanent trust.
+	trusted := true
+	if req.Trusted != nil {
+		trusted = *req.Trusted
+	}
+	if err := s.d.ApproveInbound(req.PairingID, trusted); err != nil {
 		c.JSON(http.StatusBadRequest, apiErr("pair_approve_failed", err.Error()))
 		return
 	}

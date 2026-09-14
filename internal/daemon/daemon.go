@@ -420,7 +420,7 @@ func (d *Daemon) SendPIN(pairingID, pin string) error {
 // ApproveInbound sends a local receiver approval to the waiting peer. The
 // caller is protected by the local-only API route; the peer cannot approve
 // itself over the network.
-func (d *Daemon) ApproveInbound(pairingID string) error {
+func (d *Daemon) ApproveInbound(pairingID string, trusted bool) error {
 	entry, ok := d.pending.Get(pairingID)
 	if !ok {
 		return fmt.Errorf("no inbound pairing for pairing_id %s", pairingID)
@@ -439,7 +439,7 @@ func (d *Daemon) ApproveInbound(pairingID string) error {
 	if target == nil {
 		return fmt.Errorf("pairing connection is no longer active")
 	}
-	return target.Send(event.Message{V: 1, Seq: time.Now().UnixNano(), Type: event.TypePairApprove, Ts: time.Now().UnixMilli(), Payload: event.PairConfirmPayload{PairingID: pairingID}})
+	return target.Send(event.Message{V: 1, Seq: time.Now().UnixNano(), Type: event.TypePairApprove, Ts: time.Now().UnixMilli(), Payload: event.PairConfirmPayload{PairingID: pairingID, Trusted: trusted}})
 }
 
 // RejectOutbound rejects an outbound pairing by closing its connection.

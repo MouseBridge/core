@@ -56,6 +56,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 	defer h.UntrackPendingConn(connID)
 	adopted := false
 	var pairingID string
+	approvedTrusted := false
 
 	defer func() {
 		if !adopted {
@@ -191,6 +192,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 			if e == nil {
 				continue
 			}
+			approvedTrusted = approval.Trusted
 			result = pending.VerifyOK
 		default:
 			continue
@@ -200,7 +202,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 			// Pairing success.
 			var accepted event.PairAcceptPayload
 			if h.RememberedEnabled() {
-				rec, saveErr := buildAndSaveRemembered(claimedID, peerDisplayID, peerName, remoteAddr, rem, true)
+				rec, saveErr := buildAndSaveRemembered(claimedID, peerDisplayID, peerName, remoteAddr, rem, approvedTrusted)
 				if saveErr == nil {
 					accepted = event.PairAcceptPayload{Remembered: true, Trusted: rec.TrustedAutoConnect, SecretID: rec.SecretID, PairSecret: rec.PairSecret}
 				} else {
