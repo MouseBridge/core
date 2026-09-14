@@ -262,6 +262,12 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 		case event.TypePairChallenge:
 			var challenge event.PairChallengePayload
 			_ = event.DecodePayload(reply, &challenge)
+			if remStore != nil {
+				if rec, ok := remStore.Get(serverID); ok && rec.TrustedAutoConnect {
+					emit(BusEvent{Kind: "error", Msg: fmt.Sprintf("trusted reconnect rejected by %s: remembered credentials were not accepted; forget and pair again", serverName)})
+					return
+				}
+			}
 			pairingID = challenge.PairingID
 			expiresAt := time.Now().Add(2 * time.Minute)
 

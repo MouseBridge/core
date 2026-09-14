@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -123,6 +124,10 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 						log.Printf("[p2p] remembered device %s (%s) authenticated and auto-connected", peerName, claimedID[:12])
 						adopted = true
 						go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
+						return
+					}
+					if rec.TrustedAutoConnect {
+						emit(BusEvent{Kind: "error", Msg: fmt.Sprintf("trusted reconnect rejected for %s: remembered credentials do not match; forget and pair again", peerName)})
 						return
 					}
 					log.Printf("[p2p] remembered proof invalid for %s (%s); falling back to PIN", peerName, claimedID[:12])

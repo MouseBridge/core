@@ -470,11 +470,6 @@ func (d *Daemon) emitBus(ev p2p.BusEvent) {
 		log.Printf("[daemon] paired with %s", ev.Name)
 	case "session_connected":
 		d.clearReconnect(ev.DeviceID)
-		// A trusted client reconnect is the user's remembered active device.
-		// Do not override an explicit target selection made after connection.
-		if ev.Role == "client" && d.rememberedTrusted(ev.DeviceID) && d.ctrl.ActiveTarget() == d.identity.DeviceID {
-			d.ctrl.SwitchTo(ev.DeviceID)
-		}
 		log.Printf("[daemon] session connected: %s (%s) role=%s", ev.Name, ev.DeviceID[:12], ev.Role)
 	case "session_disconnected":
 		log.Printf("[daemon] session disconnected: %s", ev.Name)
@@ -1061,11 +1056,6 @@ func (d *Daemon) scheduleReconnectWithDelay(deviceID string, initialDelay time.D
 		d.scheduleReconnect(deviceID)
 	})
 	d.reconnectMu.Unlock()
-}
-
-func (d *Daemon) rememberedTrusted(deviceID string) bool {
-	rec, ok := d.rem.Get(deviceID)
-	return ok && rec.TrustedAutoConnect
 }
 
 func (d *Daemon) switchRelative(step int) {

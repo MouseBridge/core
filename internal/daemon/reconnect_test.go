@@ -43,7 +43,7 @@ func TestStartImmediatelyAttemptsTrustedReconnect(t *testing.T) {
 	}
 }
 
-func TestTrustedClientConnectionSelectsRememberedDevice(t *testing.T) {
+func TestTrustedClientConnectionDoesNotSelectRememberedDevice(t *testing.T) {
 	d, err := New(newTestOptions(t))
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestTrustedClientConnectionSelectsRememberedDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.emitBus(p2p.BusEvent{Kind: "session_connected", DeviceID: "remote-device", Name: "remote", Role: "client"})
-	if got := d.ctrl.ActiveTarget(); got != "remote-device" {
-		t.Fatalf("active target=%q want remote-device", got)
+	if got := d.ctrl.ActiveTarget(); got != d.identity.DeviceID {
+		t.Fatalf("active target=%q want local device %q", got, d.identity.DeviceID)
 	}
 }
