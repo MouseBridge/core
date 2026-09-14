@@ -53,18 +53,21 @@ type EdgeTargets struct {
 // Default returns a Config with sensible defaults.
 func Default() *Config {
 	return &Config{
-		ListenHost:            "127.0.0.1",
-		Port:                  39172,
-		UnsafeHTTPLAN:         false,
-		RememberedEnabled:     true,
-		PairingPINTTLSeconds:  120,
-		PairingPINMaxAttempts: 3,
-		ConnectTimeoutSeconds: 5,
-		JSONBodyLimitBytes:    65536,
+		ListenHost:                   "127.0.0.1",
+		Port:                         39172,
+		UnsafeHTTPLAN:                false,
+		RememberedEnabled:            true,
+		RememberedAutoConnectEnabled: true,
+		PairingPINTTLSeconds:         120,
+		PairingPINMaxAttempts:        3,
+		ConnectTimeoutSeconds:        5,
+		JSONBodyLimitBytes:           65536,
 		Hotkeys: Hotkeys{
-			SwitchNext:   "ctrl+alt+right",
-			SwitchPrev:   "ctrl+alt+left",
-			SwitchToHost: "ctrl+alt+escape",
+			SwitchNext:    "ctrl+alt+right",
+			SwitchPrev:    "ctrl+alt+left",
+			SwitchToHost:  "ctrl+alt+escape",
+			DisconnectAll: "ctrl+alt+backspace",
+			TogglePause:   "ctrl+alt+p",
 		},
 		DeviceName: hostname(),
 	}
@@ -124,6 +127,23 @@ func Load(path string) (*Config, error) {
 	cfg := Default()
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
+	// Migrate configurations created before disconnect/pause defaults existed.
+	// Empty values here mean "not configured", so restore the safe defaults.
+	if cfg.Hotkeys.SwitchNext == "" {
+		cfg.Hotkeys.SwitchNext = Default().Hotkeys.SwitchNext
+	}
+	if cfg.Hotkeys.SwitchPrev == "" {
+		cfg.Hotkeys.SwitchPrev = Default().Hotkeys.SwitchPrev
+	}
+	if cfg.Hotkeys.SwitchToHost == "" {
+		cfg.Hotkeys.SwitchToHost = Default().Hotkeys.SwitchToHost
+	}
+	if cfg.Hotkeys.DisconnectAll == "" {
+		cfg.Hotkeys.DisconnectAll = Default().Hotkeys.DisconnectAll
+	}
+	if cfg.Hotkeys.TogglePause == "" {
+		cfg.Hotkeys.TogglePause = Default().Hotkeys.TogglePause
 	}
 	return cfg, nil
 }

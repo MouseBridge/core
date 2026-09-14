@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -18,6 +19,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.PairingPINTTLSeconds != 120 {
 		t.Fatalf("default pin ttl: want 120 got %d", cfg.PairingPINTTLSeconds)
 	}
+	if !cfg.RememberedAutoConnectEnabled {
+		t.Fatal("remembered auto-connect should be enabled by default")
+	}
 	if cfg.Hotkeys.SwitchNext != "ctrl+alt+right" {
 		t.Fatalf("default switch_next: want ctrl+alt+right got %q", cfg.Hotkeys.SwitchNext)
 	}
@@ -26,6 +30,12 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.Hotkeys.SwitchToHost != "ctrl+alt+escape" {
 		t.Fatalf("default switch_to_host: want ctrl+alt+escape got %q", cfg.Hotkeys.SwitchToHost)
+	}
+	if cfg.Hotkeys.DisconnectAll != "ctrl+alt+backspace" {
+		t.Fatalf("default disconnect_all: want ctrl+alt+backspace got %q", cfg.Hotkeys.DisconnectAll)
+	}
+	if cfg.Hotkeys.TogglePause != "ctrl+alt+p" {
+		t.Fatalf("default toggle_pause: want ctrl+alt+p got %q", cfg.Hotkeys.TogglePause)
 	}
 	if cfg.EdgeTargets.Left != "" || cfg.EdgeTargets.Right != "" || cfg.EdgeTargets.Top != "" || cfg.EdgeTargets.Bottom != "" {
 		t.Fatalf("default edge targets should be empty, got %+v", cfg.EdgeTargets)
@@ -94,6 +104,21 @@ func TestSaveLoad(t *testing.T) {
 	}
 	if loaded.EdgeTargets.Right != "remote-a" {
 		t.Fatalf("edge_targets.right: want remote-a got %q", loaded.EdgeTargets.Right)
+	}
+}
+
+func TestLoadMigratesEmptyHotkeyDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"hotkeys":{"switch_next":"ctrl+alt+right","switch_prev":"ctrl+alt+left","switch_to_host":"ctrl+alt+escape","disconnect_all":"","toggle_pause":""}}`), 0600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Hotkeys.DisconnectAll != "ctrl+alt+backspace" || cfg.Hotkeys.TogglePause != "ctrl+alt+p" {
+		t.Fatalf("legacy hotkeys were not migrated: %+v", cfg.Hotkeys)
 	}
 }
 
