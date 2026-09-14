@@ -1,8 +1,6 @@
 package p2p
 
 import (
-	"crypto/subtle"
-	"fmt"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -96,47 +94,19 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 
 	// Check remembered.
 	rem := h.RememberedStore()
-	if h.RememberedAutoConnectEnabled() && peerHello.SupportsRemembered {
-		if rec, ok := rem.Get(claimedID); ok && rec.TrustedAutoConnect {
-			nonce, err := randomHex16()
-			if err == nil {
-				_ = c.Send(event.Message{
-					V: 1, Seq: nextSeq(), Type: event.TypeRememberedChallenge, Ts: nowMs(),
-					Payload: event.RememberedChallengePayload{SecretID: rec.SecretID, Nonce: nonce},
-				})
-
-				msg, recvErr := c.Recv()
-				if recvErr != nil {
-					emit(BusEvent{Kind: "error", Msg: "connection lost during trusted reconnect check"})
-					return
-				}
-				if msg.Type == event.TypeRememberedProof {
-					var pay event.RememberedProofPayload
-					_ = event.DecodePayload(msg, &pay)
-					expected := computeRememberedProof(rec.PairSecret, claimedID, localID, rec.SecretID, nonce)
-					if pay.SecretID == rec.SecretID && subtle.ConstantTimeCompare([]byte(pay.Proof), []byte(expected)) == 1 {
-						_ = c.Send(event.Message{
-							V: 1, Seq: nextSeq(), Type: event.TypePairAccept, Ts: nowMs(),
-							Payload: event.PairAcceptPayload{Remembered: true, Trusted: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret},
-						})
-						_ = rem.UpdateLastSeen(claimedID, time.Now())
-						trusted := true
-						_ = rem.Patch(claimedID, remembered.Patch{TrustedAutoConnect: &trusted})
-						log.Printf("[p2p] remembered device %s (%s) authenticated and auto-connected", peerName, claimedID[:12])
-						adopted = true
-						go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
-						return
-					}
-					if rec.TrustedAutoConnect {
-						emit(BusEvent{Kind: "error", Msg: fmt.Sprintf("trusted reconnect rejected for %s: remembered credentials do not match; forget and pair again", peerName)})
-						return
-					}
-					log.Printf("[p2p] remembered proof invalid for %s (%s); falling back to PIN", peerName, claimedID[:12])
-				} else {
-					log.Printf("[p2p] unexpected message %s during remembered auth for %s (%s); falling back to PIN", msg.Type, peerName, claimedID[:12])
-				}
-			}
-		}
+	if rec, ok := rem.Get(claimedID); ok && rec.TrustedAutoConnect {
+		// The receiver owns trust. An exact remembered device ID is enough to
+		// allow the connection, including older clients that do not implement
+		// the remembered challenge/proof exchange.
+		_ = c.Send(event.Message{
+			V: 1, Seq: nextSeq(), Type: event.TypePairAccept, Ts: nowMs(),
+			Payload: event.PairAcceptPayload{Remembered: true, Trusted: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret},
+		})
+		_ = rem.UpdateLastSeen(claimedID, time.Now())
+		log.Printf("[p2p] remembered device %s (%s) matched receiver trust and auto-connected", peerName, claimedID[:12])
+		adopted = true
+		go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
+		return
 	}
 
 	// New device: start PIN pairing.

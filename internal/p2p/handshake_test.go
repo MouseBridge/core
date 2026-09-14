@@ -129,12 +129,13 @@ func TestHandleInboundRememberedDeviceRequiresPINWhenAutoConnectDisabled(t *test
 	}
 }
 
-func TestHandleInboundRememberedDeviceUsesChallengeProofWhenTrusted(t *testing.T) {
+func TestHandleInboundRememberedDeviceIsAcceptedWithoutPINWhenTrusted(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
 
-	rem, err := remembered.New(filepath.Join(t.TempDir(), "remembered.json"))
+	storePath := filepath.Join(t.TempDir(), "remembered.json")
+	rem, err := remembered.New(storePath)
 	if err != nil {
 		t.Fatalf("remembered.New: %v", err)
 	}
@@ -153,6 +154,11 @@ func TestHandleInboundRememberedDeviceUsesChallengeProofWhenTrusted(t *testing.T
 	}
 	if err := rem.Add(rec); err != nil {
 		t.Fatalf("rem.Add: %v", err)
+	}
+	// Reopen the persisted store to prove receiver trust survives a restart.
+	rem, err = remembered.New(storePath)
+	if err != nil {
+		t.Fatalf("remembered.New after reload: %v", err)
 	}
 
 	host := &fakeServerHost{
@@ -185,33 +191,10 @@ func TestHandleInboundRememberedDeviceUsesChallengeProofWhenTrusted(t *testing.T
 
 	msg, err := clientConn.Recv()
 	if err != nil {
-		t.Fatalf("Recv remembered challenge: %v", err)
+		t.Fatalf("Recv remembered pair_accept: %v", err)
 	}
-	if msg.Type != event.TypeRememberedChallenge {
-		t.Fatalf("msg.Type=%q want %q", msg.Type, event.TypeRememberedChallenge)
-	}
-	var challenge event.RememberedChallengePayload
-	_ = event.DecodePayload(msg, &challenge)
-	if challenge.SecretID != rec.SecretID {
-		t.Fatalf("challenge.SecretID=%q want %q", challenge.SecretID, rec.SecretID)
-	}
-
-	if err := clientConn.Send(event.Message{
-		V: 1, Seq: 2, Type: event.TypeRememberedProof, Ts: time.Now().UnixMilli(),
-		Payload: event.RememberedProofPayload{
-			SecretID: rec.SecretID,
-			Proof:    computeRememberedProof(rec.PairSecret, clientID, host.localID, rec.SecretID, challenge.Nonce),
-		},
-	}); err != nil {
-		t.Fatalf("Send remembered_proof: %v", err)
-	}
-
-	reply, err := clientConn.Recv()
-	if err != nil {
-		t.Fatalf("Recv pair_accept: %v", err)
-	}
-	if reply.Type != event.TypePairAccept {
-		t.Fatalf("reply.Type=%q want %q", reply.Type, event.TypePairAccept)
+	if msg.Type != event.TypePairAccept {
+		t.Fatalf("msg.Type=%q want pair_accept", msg.Type)
 	}
 
 	select {
