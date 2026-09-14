@@ -224,7 +224,7 @@ func TestHandleInboundRememberedDeviceUsesChallengeProofWhenTrusted(t *testing.T
 	}
 }
 
-func TestDialAndPairSkipsRememberedSaveWhenServerDoesNotRemember(t *testing.T) {
+func TestDialAndPairAcknowledgesReceiverApproval(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
@@ -275,32 +275,24 @@ func TestDialAndPairSkipsRememberedSaveWhenServerDoesNotRemember(t *testing.T) {
 		t.Fatal("timed out waiting for pair_request")
 	}
 
-	op, ok := tracker.Get(pairingID)
-	if !ok {
-		t.Fatal("expected outbound tracker entry")
+	if err := serverConn.Send(event.Message{
+		V: 1, Seq: 2, Type: event.TypePairApprove, Ts: time.Now().UnixMilli(),
+		Payload: event.PairConfirmPayload{PairingID: pairingID, Trusted: true},
+	}); err != nil {
+		t.Fatalf("Send pair_approve: %v", err)
 	}
-	sendErrCh := make(chan error, 1)
-	go func() {
-		sendErrCh <- op.Conn.Send(event.Message{
-			V: 1, Seq: 2, Type: event.TypePairConfirm, Ts: time.Now().UnixMilli(),
-			Payload: event.PairConfirmPayload{PairingID: pairingID, PIN: "123456"},
-		})
-	}()
 
 	reply, err := serverConn.Recv()
 	if err != nil {
-		t.Fatalf("Recv pair_confirm: %v", err)
+		t.Fatalf("Recv echoed pair_approve: %v", err)
 	}
-	if reply.Type != event.TypePairConfirm {
-		t.Fatalf("reply.Type=%q want %q", reply.Type, event.TypePairConfirm)
-	}
-	if err := <-sendErrCh; err != nil {
-		t.Fatalf("Send pair_confirm: %v", err)
+	if reply.Type != event.TypePairApprove {
+		t.Fatalf("reply.Type=%q want %q", reply.Type, event.TypePairApprove)
 	}
 
 	if err := serverConn.Send(event.Message{
 		V: 1, Seq: 3, Type: event.TypePairAccept, Ts: time.Now().UnixMilli(),
-		Payload: event.PairAcceptPayload{Remembered: false},
+		Payload: event.PairAcceptPayload{Remembered: true, Trusted: true, SecretID: "test-secret", PairSecret: "test-pair-secret"},
 	}); err != nil {
 		t.Fatalf("Send pair_accept: %v", err)
 	}
@@ -314,7 +306,8 @@ func TestDialAndPairSkipsRememberedSaveWhenServerDoesNotRemember(t *testing.T) {
 		t.Fatal("timed out waiting for paired event")
 	}
 
-	if got := len(rem.List()); got != 0 {
-		t.Fatalf("remembered count=%d want 0", got)
+	record, ok := rem.Get("0123456789abcdef0123456789abcdef")
+	if !ok || !record.TrustedAutoConnect {
+		t.Fatalf("receiver approval was not persisted as trusted: ok=%t record=%+v", ok, record)
 	}
 }

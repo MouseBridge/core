@@ -289,6 +289,23 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 				AttemptsRemaining: 3, ExpiresAt: expiresAt.Unix(),
 			})
 			log.Printf("[p2p] pairing with %s — enter PIN shown on remote device", serverName)
+		case event.TypePairApprove:
+			// Receiver approval is sent to the client first so the client UI
+			// can acknowledge it on the same connection. The server-side
+			// handshake consumes this echoed approval and completes pairing.
+			var approval event.PairConfirmPayload
+			_ = event.DecodePayload(reply, &approval)
+			if approval.PairingID == "" || approval.PairingID != pairingID {
+				emit(BusEvent{Kind: "error", Msg: "received invalid pairing approval"})
+				return
+			}
+			if err := c.Send(event.Message{
+				V: 1, Seq: nextSeq(), Type: event.TypePairApprove, Ts: nowMs(),
+				Payload: approval,
+			}); err != nil {
+				emit(BusEvent{Kind: "error", Msg: "failed to acknowledge pairing approval"})
+				return
+			}
 		case event.TypePairReject:
 			emit(BusEvent{Kind: "pair_reject", PairingID: pairingID, Msg: "rejected by server"})
 			return
