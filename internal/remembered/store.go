@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -215,9 +216,32 @@ func (s *Store) List() []DTO {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]DTO, 0, len(s.records))
-	for _, r := range s.records {
+	for _, r := range sortedRecords(s.records) {
 		out = append(out, toDTO(r))
 	}
+	return out
+}
+
+// sortedRecords preserves the user's remembered-device order. CreatedAt is
+// the insertion order for current records; DeviceID makes legacy records with
+// missing timestamps deterministic as well.
+func sortedRecords(records map[string]Record) []Record {
+	out := make([]Record, 0, len(records))
+	for _, r := range records {
+		out = append(out, r)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].DeviceID < out[j].DeviceID
+		}
+		if out[i].CreatedAt.IsZero() {
+			return true
+		}
+		if out[j].CreatedAt.IsZero() {
+			return false
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
 	return out
 }
 
@@ -230,10 +254,7 @@ func cloneMap(m map[string]Record) map[string]Record {
 }
 
 func (s *Store) persist(records map[string]Record) error {
-	recs := make([]Record, 0, len(records))
-	for _, r := range records {
-		recs = append(recs, r)
-	}
+	recs := sortedRecords(records)
 	data, err := json.MarshalIndent(recs, "", "  ")
 	if err != nil {
 		return err

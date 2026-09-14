@@ -210,6 +210,16 @@ func (d *Daemon) Start() error {
 
 	d.broadcast(BusEvent{Kind: "listening"})
 	d.helper.BroadcastConfig()
+	// Reconnect trusted remembered devices immediately after the daemon is
+	// ready. Previously reconnect was only scheduled after a disconnect event,
+	// so restarting the app left all remembered devices disconnected forever.
+	if d.cfg.RememberedAutoConnectEnabled {
+		for _, device := range d.rem.List() {
+			if device.TrustedAutoConnect && device.Endpoint != "" {
+				go d.scheduleReconnectWithDelay(device.DeviceID, 0)
+			}
+		}
+	}
 	return nil
 }
 
@@ -460,6 +470,11 @@ func (d *Daemon) emitBus(ev p2p.BusEvent) {
 		log.Printf("[daemon] paired with %s", ev.Name)
 	case "session_connected":
 		d.clearReconnect(ev.DeviceID)
+		// A trusted client reconnect is the user's remembered active device.
+		// Do not override an explicit target selection made after connection.
+		if ev.Role == "client" && d.rememberedTrusted(ev.DeviceID) && d.ctrl.ActiveTarget() == d.identity.DeviceID {
+			d.ctrl.SwitchTo(ev.DeviceID)
+		}
 		log.Printf("[daemon] session connected: %s (%s) role=%s", ev.Name, ev.DeviceID[:12], ev.Role)
 	case "session_disconnected":
 		log.Printf("[daemon] session disconnected: %s", ev.Name)
@@ -989,6 +1004,10 @@ func (d *Daemon) hasPendingPair(displayID string) bool {
 // no longer trusts this device, DialAndPair leaves an outbound PIN request in
 // the tracker and this loop stops, allowing the normal PIN fallback UI.
 func (d *Daemon) scheduleReconnect(deviceID string) {
+	d.scheduleReconnectWithDelay(deviceID, time.Second)
+}
+
+func (d *Daemon) scheduleReconnectWithDelay(deviceID string, initialDelay time.Duration) {
 	rec, ok := d.rem.Get(deviceID)
 	if !ok || !rec.TrustedAutoConnect || !d.cfg.RememberedAutoConnectEnabled || rec.Endpoint == "" {
 		return
@@ -1014,7 +1033,13 @@ func (d *Daemon) scheduleReconnect(deviceID string) {
 		return
 	}
 	d.reconnectAttempts[deviceID] = attempt + 1
-	delay := time.Duration(1<<attempt) * time.Second
+	delay := initialDelay
+	if delay < 0 {
+		delay = 0
+	}
+	if attempt > 0 {
+		delay = time.Duration(1<<attempt) * time.Second
+	}
 	d.reconnectTimers[deviceID] = time.AfterFunc(delay, func() {
 		d.reconnectMu.Lock()
 		delete(d.reconnectTimers, deviceID)
@@ -1036,6 +1061,11 @@ func (d *Daemon) scheduleReconnect(deviceID string) {
 		d.scheduleReconnect(deviceID)
 	})
 	d.reconnectMu.Unlock()
+}
+
+func (d *Daemon) rememberedTrusted(deviceID string) bool {
+	rec, ok := d.rem.Get(deviceID)
+	return ok && rec.TrustedAutoConnect
 }
 
 func (d *Daemon) switchRelative(step int) {
