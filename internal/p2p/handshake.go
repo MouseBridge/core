@@ -22,6 +22,8 @@ type ServerHost interface {
 	RememberedStore() *remembered.Store
 	RememberedEnabled() bool
 	RememberedAutoConnectEnabled() bool
+	TrackPendingConn(connectionID string, c *transport.Conn)
+	UntrackPendingConn(connectionID string)
 }
 
 // BusEvent carries session lifecycle updates to the daemon for broadcasting.
@@ -49,6 +51,8 @@ type BusEvent struct {
 // On success, calls RunSession in a new goroutine.
 func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost SessionHost, emit func(BusEvent)) {
 	connID := newConnectionID()
+	h.TrackPendingConn(connID, c)
+	defer h.UntrackPendingConn(connID)
 	adopted := false
 	var pairingID string
 
@@ -163,13 +167,29 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 			return
 		}
 
-		if msg.Type != event.TypePairConfirm {
+		var result pending.VerifyResult
+		var e *pending.Entry
+		switch msg.Type {
+		case event.TypePairConfirm:
+			var pay event.PairConfirmPayload
+			_ = event.DecodePayload(msg, &pay)
+			result, e = pm.Verify(pairingID, pay.PIN)
+		case event.TypePairApprove:
+			var approval event.PairConfirmPayload
+			_ = event.DecodePayload(msg, &approval)
+			if approval.PairingID != pairingID {
+				continue
+			}
+			// Explicit approval from the receiver's local UI is the authorization
+			// step. PIN confirmation remains supported for older clients.
+			e = pm.Reject(pairingID)
+			if e == nil {
+				continue
+			}
+			result = pending.VerifyOK
+		default:
 			continue
 		}
-		var pay event.PairConfirmPayload
-		_ = event.DecodePayload(msg, &pay)
-
-		result, e := pm.Verify(pairingID, pay.PIN)
 		switch result {
 		case pending.VerifyOK:
 			// Pairing success.

@@ -91,6 +91,7 @@ func (s *Server) routes(r *gin.Engine) {
 	local.POST("/helper/install", s.handleLocalHelperInstall)
 	local.POST("/helper/restart", s.handleLocalHelperRestart)
 	local.POST("/helper/open-accessibility", s.handleLocalHelperOpenAccessibility)
+	local.POST("/pair/approve", s.handlePairApprove)
 	local.POST("/lab/start", s.handleLocalLabStart)
 	local.POST("/lab/stop", s.handleLocalLabStop)
 	local.POST("/validation/run", s.handleLocalValidationRun)

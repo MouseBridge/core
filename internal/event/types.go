@@ -6,11 +6,12 @@ const (
 	TypeHello = "hello"
 
 	// Pairing phase
-	TypePairChallenge = "pair_challenge"
-	TypePairConfirm   = "pair_confirm"
-	TypePairAccept    = "pair_accept"
-	TypePairReject    = "pair_reject"
-	TypePairRetry     = "pair_retry"
+	TypePairChallenge       = "pair_challenge"
+	TypePairConfirm         = "pair_confirm"
+	TypePairApprove         = "pair_approve"
+	TypePairAccept          = "pair_accept"
+	TypePairReject          = "pair_reject"
+	TypePairRetry           = "pair_retry"
 	TypeRememberedChallenge = "remembered_challenge"
 	TypeRememberedProof     = "remembered_proof"
 

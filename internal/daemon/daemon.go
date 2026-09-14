@@ -60,8 +60,9 @@ type Daemon struct {
 	sessMu   sync.RWMutex
 	sessions map[string]*sessionEntry // keyed by connectionID
 
-	connsMu sync.Mutex
-	conns   map[*transport.Conn]string // conn → deviceID (empty until authenticated)
+	connsMu      sync.Mutex
+	conns        map[*transport.Conn]string // conn → deviceID (empty until authenticated)
+	pendingConns map[string]*transport.Conn
 
 	subsMu sync.RWMutex
 	subs   map[chan BusEvent]struct{}
@@ -135,6 +136,7 @@ func New(opts Options) (*Daemon, error) {
 		tracker:           p2p.NewOutboundTracker(),
 		sessions:          make(map[string]*sessionEntry),
 		conns:             make(map[*transport.Conn]string),
+		pendingConns:      make(map[string]*transport.Conn),
 		subs:              make(map[chan BusEvent]struct{}),
 		reconnectTimers:   make(map[string]*time.Timer),
 		reconnectAttempts: make(map[string]int),
@@ -295,6 +297,18 @@ func (d *Daemon) TrackConn(c *transport.Conn, deviceID string) {
 	d.connsMu.Unlock()
 }
 
+func (d *Daemon) TrackPendingConn(connectionID string, c *transport.Conn) {
+	d.connsMu.Lock()
+	d.pendingConns[connectionID] = c
+	d.connsMu.Unlock()
+}
+
+func (d *Daemon) UntrackPendingConn(connectionID string) {
+	d.connsMu.Lock()
+	delete(d.pendingConns, connectionID)
+	d.connsMu.Unlock()
+}
+
 func (d *Daemon) UntrackConn(c *transport.Conn) {
 	d.connsMu.Lock()
 	delete(d.conns, c)
@@ -391,6 +405,31 @@ func (d *Daemon) SendPIN(pairingID, pin string) error {
 		return fmt.Errorf("no outbound pairing for pairing_id %s", pairingID)
 	}
 	return op.Conn.Send(buildPairConfirm(pairingID, pin))
+}
+
+// ApproveInbound sends a local receiver approval to the waiting peer. The
+// caller is protected by the local-only API route; the peer cannot approve
+// itself over the network.
+func (d *Daemon) ApproveInbound(pairingID string) error {
+	entry, ok := d.pending.Get(pairingID)
+	if !ok {
+		return fmt.Errorf("no inbound pairing for pairing_id %s", pairingID)
+	}
+	d.connsMu.Lock()
+	target := d.pendingConns[entry.ConnectionID]
+	if target == nil {
+		for c, id := range d.conns {
+			if id == entry.ConnectionID {
+				target = c
+				break
+			}
+		}
+	}
+	d.connsMu.Unlock()
+	if target == nil {
+		return fmt.Errorf("pairing connection is no longer active")
+	}
+	return target.Send(event.Message{V: 1, Seq: time.Now().UnixNano(), Type: event.TypePairApprove, Ts: time.Now().UnixMilli(), Payload: event.PairConfirmPayload{PairingID: pairingID}})
 }
 
 // RejectOutbound rejects an outbound pairing by closing its connection.

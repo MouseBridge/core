@@ -23,13 +23,15 @@ type fakeServerHost struct {
 	rememberedAutoConnectEnabled bool
 }
 
-func (f *fakeServerHost) LocalID() string                    { return f.localID }
-func (f *fakeServerHost) LocalName() string                  { return f.localName }
-func (f *fakeServerHost) LocalDisplayID() string             { return f.localDisplayID }
-func (f *fakeServerHost) PendingManager() *pending.Manager   { return f.pending }
-func (f *fakeServerHost) RememberedStore() *remembered.Store { return f.rem }
-func (f *fakeServerHost) RememberedEnabled() bool            { return f.rememberedEnabled }
-func (f *fakeServerHost) RememberedAutoConnectEnabled() bool { return f.rememberedAutoConnectEnabled }
+func (f *fakeServerHost) LocalID() string                          { return f.localID }
+func (f *fakeServerHost) LocalName() string                        { return f.localName }
+func (f *fakeServerHost) LocalDisplayID() string                   { return f.localDisplayID }
+func (f *fakeServerHost) PendingManager() *pending.Manager         { return f.pending }
+func (f *fakeServerHost) RememberedStore() *remembered.Store       { return f.rem }
+func (f *fakeServerHost) RememberedEnabled() bool                  { return f.rememberedEnabled }
+func (f *fakeServerHost) RememberedAutoConnectEnabled() bool       { return f.rememberedAutoConnectEnabled }
+func (f *fakeServerHost) TrackPendingConn(string, *transport.Conn) {}
+func (f *fakeServerHost) UntrackPendingConn(string)                {}
 
 func TestHandleInboundRememberedDeviceRequiresPINWhenAutoConnectDisabled(t *testing.T) {
 	server, client := net.Pipe()
@@ -91,13 +93,28 @@ func TestHandleInboundRememberedDeviceRequiresPINWhenAutoConnectDisabled(t *test
 		t.Fatalf("msg.Type=%q want %q", msg.Type, event.TypePairChallenge)
 	}
 
+	var request BusEvent
 	select {
 	case ev := <-events:
 		if ev.Kind != "pair_request" {
 			t.Fatalf("event kind=%q want pair_request", ev.Kind)
 		}
+		request = ev
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for pair_request")
+	}
+	if err := clientConn.Send(event.Message{
+		V: 1, Seq: 3, Type: event.TypePairApprove, Ts: time.Now().UnixMilli(),
+		Payload: event.PairConfirmPayload{PairingID: request.PairingID},
+	}); err != nil {
+		t.Fatalf("Send pair_approve: %v", err)
+	}
+	accepted, err := clientConn.Recv()
+	if err != nil {
+		t.Fatalf("Recv pair_accept: %v", err)
+	}
+	if accepted.Type != event.TypePairAccept {
+		t.Fatalf("accepted.Type=%q want %q", accepted.Type, event.TypePairAccept)
 	}
 }
 

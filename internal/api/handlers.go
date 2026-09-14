@@ -159,6 +159,21 @@ func (s *Server) handlePairReject(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func (s *Server) handlePairApprove(c *gin.Context) {
+	var req struct {
+		PairingID string `json:"pairing_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.PairingID == "" {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "pairing_id is required"))
+		return
+	}
+	if err := s.d.ApproveInbound(req.PairingID); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("pair_approve_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (s *Server) handleRememberedList(c *gin.Context) {
 	c.JSON(http.StatusOK, s.d.RememberedList())
 }
