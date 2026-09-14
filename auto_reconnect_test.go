@@ -78,7 +78,10 @@ func TestTrustedClientAutoReconnectsAfterUnexpectedDisconnect(t *testing.T) {
 	if err := server.RememberedPatch(clientDeviceID, rememberedPatch(true)); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.RememberedPatch(serverDeviceID, rememberedPatch(true)); err != nil {
+	// Trust is owned by the receiver. The controller may still have a local
+	// record marked false and must auto-attempt it; the receiver's remembered
+	// proof decides whether PIN can be skipped.
+	if err := client.RememberedPatch(serverDeviceID, rememberedPatch(false)); err != nil {
 		t.Fatal(err)
 	}
 	if err := server.UpdateRememberedAutoConnectEnabled(true); err != nil {

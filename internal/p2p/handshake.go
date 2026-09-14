@@ -97,7 +97,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 	// Check remembered.
 	rem := h.RememberedStore()
 	if h.RememberedAutoConnectEnabled() && peerHello.SupportsRemembered {
-		if rec, ok := rem.Get(claimedID); ok {
+		if rec, ok := rem.Get(claimedID); ok && rec.TrustedAutoConnect {
 			nonce, err := randomHex16()
 			if err == nil {
 				_ = c.Send(event.Message{

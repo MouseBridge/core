@@ -215,7 +215,10 @@ func (d *Daemon) Start() error {
 	// so restarting the app left all remembered devices disconnected forever.
 	if d.cfg.RememberedAutoConnectEnabled {
 		for _, device := range d.rem.List() {
-			if device.TrustedAutoConnect && device.Endpoint != "" {
+			// Trust is owned by the receiver. The controller still needs to
+			// attempt remembered devices so a receiver-side trust decision can
+			// authenticate it without a PIN.
+			if device.Endpoint != "" {
 				go d.scheduleReconnectWithDelay(device.DeviceID, 0)
 			}
 		}
@@ -1004,7 +1007,7 @@ func (d *Daemon) scheduleReconnect(deviceID string) {
 
 func (d *Daemon) scheduleReconnectWithDelay(deviceID string, initialDelay time.Duration) {
 	rec, ok := d.rem.Get(deviceID)
-	if !ok || !rec.TrustedAutoConnect || !d.cfg.RememberedAutoConnectEnabled || rec.Endpoint == "" {
+	if !ok || !d.cfg.RememberedAutoConnectEnabled || rec.Endpoint == "" {
 		return
 	}
 	host, port, err := net.SplitHostPort(rec.Endpoint)
