@@ -116,6 +116,17 @@ func TestHandleInboundRememberedDeviceRequiresPINWhenAutoConnectDisabled(t *test
 	if accepted.Type != event.TypePairAccept {
 		t.Fatalf("accepted.Type=%q want %q", accepted.Type, event.TypePairAccept)
 	}
+	var acceptedPayload event.PairAcceptPayload
+	if err := event.DecodePayload(accepted, &acceptedPayload); err != nil {
+		t.Fatalf("DecodePayload(pair_accept): %v", err)
+	}
+	if !acceptedPayload.Remembered || !acceptedPayload.Trusted {
+		t.Fatalf("pair approval should create a trusted remembered device: %+v", acceptedPayload)
+	}
+	record, ok := rem.Get(clientID)
+	if !ok || !record.TrustedAutoConnect {
+		t.Fatalf("server did not persist trusted remembered device: ok=%t record=%+v", ok, record)
+	}
 }
 
 func TestHandleInboundRememberedDeviceUsesChallengeProofWhenTrusted(t *testing.T) {

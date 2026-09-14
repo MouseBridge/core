@@ -223,14 +223,15 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 				if pay.Remembered {
 					now := time.Now()
 					_ = remStore.Add(remembered.Record{
-						DeviceID:   serverID,
-						DisplayID:  serverID[:12],
-						Name:       serverName,
-						SecretID:   pay.SecretID,
-						PairSecret: pay.PairSecret,
-						CreatedAt:  now,
-						LastSeenAt: now,
-						Endpoint:   c.RemoteAddr().String(),
+						DeviceID:           serverID,
+						DisplayID:          serverID[:12],
+						Name:               serverName,
+						SecretID:           pay.SecretID,
+						PairSecret:         pay.PairSecret,
+						TrustedAutoConnect: pay.Trusted,
+						CreatedAt:          now,
+						LastSeenAt:         now,
+						Endpoint:           c.RemoteAddr().String(),
 					})
 				}
 			}

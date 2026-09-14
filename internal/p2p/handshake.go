@@ -159,6 +159,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 	log.Printf("[p2p] pair_request from %s (%s) — PIN: %s", peerName, claimedID[:12], pin)
 
 	// Wait for pair_confirm messages.
+	approvedByReceiver := false
 	for {
 		msg, err := c.Recv()
 		if err != nil {
@@ -186,6 +187,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 			if e == nil {
 				continue
 			}
+			approvedByReceiver = true
 			result = pending.VerifyOK
 		default:
 			continue
@@ -195,9 +197,9 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 			// Pairing success.
 			var accepted event.PairAcceptPayload
 			if h.RememberedEnabled() {
-				rec, saveErr := buildAndSaveRemembered(claimedID, peerDisplayID, peerName, remoteAddr, rem)
+				rec, saveErr := buildAndSaveRemembered(claimedID, peerDisplayID, peerName, remoteAddr, rem, approvedByReceiver)
 				if saveErr == nil {
-					accepted = event.PairAcceptPayload{Remembered: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret}
+					accepted = event.PairAcceptPayload{Remembered: true, Trusted: rec.TrustedAutoConnect, SecretID: rec.SecretID, PairSecret: rec.PairSecret}
 				} else {
 					log.Printf("[p2p] remembered save failed: %v", saveErr)
 					accepted = event.PairAcceptPayload{Remembered: false}
@@ -241,7 +243,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 	}
 }
 
-func buildAndSaveRemembered(deviceID, displayID, name, endpoint string, rem *remembered.Store) (remembered.Record, error) {
+func buildAndSaveRemembered(deviceID, displayID, name, endpoint string, rem *remembered.Store, trusted bool) (remembered.Record, error) {
 	secretID, err := randomHex16()
 	if err != nil {
 		return remembered.Record{}, err
@@ -252,14 +254,15 @@ func buildAndSaveRemembered(deviceID, displayID, name, endpoint string, rem *rem
 	}
 	now := time.Now()
 	rec := remembered.Record{
-		DeviceID:   deviceID,
-		DisplayID:  displayID,
-		Name:       name,
-		SecretID:   secretID,
-		PairSecret: pairSecret,
-		CreatedAt:  now,
-		LastSeenAt: now,
-		Endpoint:   endpoint,
+		DeviceID:           deviceID,
+		DisplayID:          displayID,
+		Name:               name,
+		SecretID:           secretID,
+		PairSecret:         pairSecret,
+		TrustedAutoConnect: trusted,
+		CreatedAt:          now,
+		LastSeenAt:         now,
+		Endpoint:           endpoint,
 	}
 	return rec, rem.Add(rec)
 }

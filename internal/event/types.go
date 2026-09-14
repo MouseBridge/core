@@ -63,6 +63,7 @@ type PairConfirmPayload struct {
 // PairAcceptPayload is sent by server on successful pairing.
 type PairAcceptPayload struct {
 	Remembered bool   `json:"remembered"`
+	Trusted    bool   `json:"trusted,omitempty"`
 	SecretID   string `json:"secret_id,omitempty"`
 	PairSecret string `json:"pair_secret,omitempty"`
 }
