@@ -212,6 +212,8 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 				if remStore != nil {
 					_ = remStore.UpdateLastSeen(serverID, time.Now())
 					_ = remStore.UpdateEndpoint(serverID, c.RemoteAddr().String())
+					trusted := true
+					_ = remStore.Patch(serverID, remembered.Patch{TrustedAutoConnect: &trusted})
 				}
 				adopted = true
 				go RunSession(c, serverID, serverName, "client", h, emit)

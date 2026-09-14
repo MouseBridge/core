@@ -96,38 +96,38 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 	rem := h.RememberedStore()
 	if h.RememberedAutoConnectEnabled() && peerHello.SupportsRemembered {
 		if rec, ok := rem.Get(claimedID); ok {
-			if rec.TrustedAutoConnect {
-				nonce, err := randomHex16()
-				if err == nil {
-					_ = c.Send(event.Message{
-						V: 1, Seq: nextSeq(), Type: event.TypeRememberedChallenge, Ts: nowMs(),
-						Payload: event.RememberedChallengePayload{SecretID: rec.SecretID, Nonce: nonce},
-					})
+			nonce, err := randomHex16()
+			if err == nil {
+				_ = c.Send(event.Message{
+					V: 1, Seq: nextSeq(), Type: event.TypeRememberedChallenge, Ts: nowMs(),
+					Payload: event.RememberedChallengePayload{SecretID: rec.SecretID, Nonce: nonce},
+				})
 
-					msg, recvErr := c.Recv()
-					if recvErr != nil {
-						emit(BusEvent{Kind: "error", Msg: "connection lost during trusted reconnect check"})
+				msg, recvErr := c.Recv()
+				if recvErr != nil {
+					emit(BusEvent{Kind: "error", Msg: "connection lost during trusted reconnect check"})
+					return
+				}
+				if msg.Type == event.TypeRememberedProof {
+					var pay event.RememberedProofPayload
+					_ = event.DecodePayload(msg, &pay)
+					expected := computeRememberedProof(rec.PairSecret, claimedID, localID, rec.SecretID, nonce)
+					if pay.SecretID == rec.SecretID && subtle.ConstantTimeCompare([]byte(pay.Proof), []byte(expected)) == 1 {
+						_ = c.Send(event.Message{
+							V: 1, Seq: nextSeq(), Type: event.TypePairAccept, Ts: nowMs(),
+							Payload: event.PairAcceptPayload{Remembered: true, Trusted: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret},
+						})
+						_ = rem.UpdateLastSeen(claimedID, time.Now())
+						trusted := true
+						_ = rem.Patch(claimedID, remembered.Patch{TrustedAutoConnect: &trusted})
+						log.Printf("[p2p] remembered device %s (%s) authenticated and auto-connected", peerName, claimedID[:12])
+						adopted = true
+						go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
 						return
 					}
-					if msg.Type == event.TypeRememberedProof {
-						var pay event.RememberedProofPayload
-						_ = event.DecodePayload(msg, &pay)
-						expected := computeRememberedProof(rec.PairSecret, claimedID, localID, rec.SecretID, nonce)
-						if pay.SecretID == rec.SecretID && subtle.ConstantTimeCompare([]byte(pay.Proof), []byte(expected)) == 1 {
-							_ = c.Send(event.Message{
-								V: 1, Seq: nextSeq(), Type: event.TypePairAccept, Ts: nowMs(),
-								Payload: event.PairAcceptPayload{Remembered: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret},
-							})
-							_ = rem.UpdateLastSeen(claimedID, time.Now())
-							log.Printf("[p2p] remembered device %s (%s) authenticated and auto-connected", peerName, claimedID[:12])
-							adopted = true
-							go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
-							return
-						}
-						log.Printf("[p2p] remembered proof invalid for %s (%s); falling back to PIN", peerName, claimedID[:12])
-					} else {
-						log.Printf("[p2p] unexpected message %s during remembered auth for %s (%s); falling back to PIN", msg.Type, peerName, claimedID[:12])
-					}
+					log.Printf("[p2p] remembered proof invalid for %s (%s); falling back to PIN", peerName, claimedID[:12])
+				} else {
+					log.Printf("[p2p] unexpected message %s during remembered auth for %s (%s); falling back to PIN", msg.Type, peerName, claimedID[:12])
 				}
 			}
 		}
@@ -159,7 +159,6 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 	log.Printf("[p2p] pair_request from %s (%s) — PIN: %s", peerName, claimedID[:12], pin)
 
 	// Wait for pair_confirm messages.
-	approvedByReceiver := false
 	for {
 		msg, err := c.Recv()
 		if err != nil {
@@ -187,7 +186,6 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 			if e == nil {
 				continue
 			}
-			approvedByReceiver = true
 			result = pending.VerifyOK
 		default:
 			continue
@@ -197,7 +195,7 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 			// Pairing success.
 			var accepted event.PairAcceptPayload
 			if h.RememberedEnabled() {
-				rec, saveErr := buildAndSaveRemembered(claimedID, peerDisplayID, peerName, remoteAddr, rem, approvedByReceiver)
+				rec, saveErr := buildAndSaveRemembered(claimedID, peerDisplayID, peerName, remoteAddr, rem, true)
 				if saveErr == nil {
 					accepted = event.PairAcceptPayload{Remembered: true, Trusted: rec.TrustedAutoConnect, SecretID: rec.SecretID, PairSecret: rec.PairSecret}
 				} else {
