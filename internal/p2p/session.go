@@ -262,12 +262,9 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 		case event.TypePairChallenge:
 			var challenge event.PairChallengePayload
 			_ = event.DecodePayload(reply, &challenge)
-			if remStore != nil {
-				if rec, ok := remStore.Get(serverID); ok && rec.TrustedAutoConnect {
-					emit(BusEvent{Kind: "error", Msg: fmt.Sprintf("trusted reconnect rejected by %s: remembered credentials were not accepted; forget and pair again", serverName)})
-					return
-				}
-			}
+			// A PairChallenge means the remote side does not support (or did
+			// not use) remembered authentication. Keep the legacy PIN flow so
+			// a new client can still connect to an older server binary.
 			pairingID = challenge.PairingID
 			expiresAt := time.Now().Add(2 * time.Minute)
 

@@ -948,7 +948,7 @@ func (d *Daemon) disconnectAll() {
 	}
 }
 
-const maxAutoReconnectAttempts = 5
+const maxReconnectBackoffAttempt = 5
 
 func (d *Daemon) markManualDisconnect(deviceID string) {
 	d.reconnectMu.Lock()
@@ -997,7 +997,7 @@ func (d *Daemon) hasPendingPair(displayID string) bool {
 
 // scheduleReconnect retries only trusted client sessions. If the remote side
 // no longer trusts this device, DialAndPair leaves an outbound PIN request in
-// the tracker and this loop stops, allowing the normal PIN fallback UI.
+// the tracker and this loop stops so the normal PIN fallback UI can be used.
 func (d *Daemon) scheduleReconnect(deviceID string) {
 	d.scheduleReconnectWithDelay(deviceID, time.Second)
 }
@@ -1022,18 +1022,22 @@ func (d *Daemon) scheduleReconnectWithDelay(deviceID string, initialDelay time.D
 		return
 	}
 	attempt := d.reconnectAttempts[deviceID]
-	if attempt >= maxAutoReconnectAttempts {
-		d.reconnectMu.Unlock()
-		d.broadcast(BusEvent{Kind: "error", DeviceID: deviceID, Msg: "trusted reconnect stopped after repeated failures; use Reconnect to try again"})
-		return
+	// Keep retrying indefinitely. A remote daemon may start later or a
+	// network can be temporarily unavailable; stopping after five attempts
+	// made a trusted device stay disconnected until the user clicked Reconnect.
+	if attempt < maxReconnectBackoffAttempt+1 {
+		d.reconnectAttempts[deviceID] = attempt + 1
 	}
-	d.reconnectAttempts[deviceID] = attempt + 1
 	delay := initialDelay
 	if delay < 0 {
 		delay = 0
 	}
 	if attempt > 0 {
-		delay = time.Duration(1<<attempt) * time.Second
+		backoffAttempt := attempt
+		if backoffAttempt > maxReconnectBackoffAttempt {
+			backoffAttempt = maxReconnectBackoffAttempt
+		}
+		delay = time.Duration(1<<backoffAttempt) * time.Second
 	}
 	d.reconnectTimers[deviceID] = time.AfterFunc(delay, func() {
 		d.reconnectMu.Lock()
