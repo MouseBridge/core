@@ -89,6 +89,7 @@ func (s *Server) routes(r *gin.Engine) {
 	api.GET("/files", s.handleFilesGet)
 	api.PUT("/files/settings", s.handleFilesSettingsPut)
 	api.POST("/files/send", s.handleFilesSend)
+	api.POST("/files/send-folder", s.handleFilesSendFolder)
 
 	local := api.Group("/local")
 	local.Use(localOnlyMiddleware())

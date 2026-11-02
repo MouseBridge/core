@@ -1,9 +1,12 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -589,6 +592,59 @@ func (s *Server) handleFilesSend(c *gin.Context) {
 		return
 	}
 	st, err := s.d.SendFileFromBytes(req.DeviceID, req.FileName, raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("file_send_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "transfer": st})
+}
+
+func (s *Server) handleFilesSendFolder(c *gin.Context) {
+	var req struct {
+		DeviceID   string `json:"device_id"`
+		FolderName string `json:"folder_name"`
+		Files      []struct {
+			FileName   string `json:"file_name"`
+			DataBase64 string `json:"data_base64"`
+		} `json:"files"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.FolderName) == "" || len(req.Files) == 0 {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "folder_name and files are required"))
+		return
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	root := filepath.Base(filepath.Clean(req.FolderName))
+	for _, file := range req.Files {
+		name := filepath.ToSlash(filepath.Clean(file.FileName))
+		if name == "." || strings.HasPrefix(name, "../") || strings.HasPrefix(name, "/") {
+			_ = zw.Close()
+			c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid folder entry path"))
+			return
+		}
+		data, err := base64.StdEncoding.DecodeString(file.DataBase64)
+		if err != nil {
+			_ = zw.Close()
+			c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid folder file data"))
+			return
+		}
+		entry, err := zw.Create(filepath.ToSlash(filepath.Join(root, name)))
+		if err != nil {
+			_ = zw.Close()
+			c.JSON(http.StatusBadRequest, apiErr("file_send_failed", err.Error()))
+			return
+		}
+		if _, err = entry.Write(data); err != nil {
+			_ = zw.Close()
+			c.JSON(http.StatusBadRequest, apiErr("file_send_failed", err.Error()))
+			return
+		}
+	}
+	if err := zw.Close(); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("file_send_failed", err.Error()))
+		return
+	}
+	st, err := s.d.SendFileFromBytes(req.DeviceID, root+".zip", buf.Bytes())
 	if err != nil {
 		c.JSON(http.StatusBadRequest, apiErr("file_send_failed", err.Error()))
 		return
