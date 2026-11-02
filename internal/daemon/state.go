@@ -48,8 +48,13 @@ type StatusSnapshot struct {
 	ControllingRemote            bool                `json:"controlling_remote"`
 	Paused                       bool                `json:"paused"`
 	CaptureEnabled               bool                `json:"capture_enabled"`
-	RememberedAutoConnectEnabled bool                `json:"remembered_auto_connect_enabled"`
-	UnsafeHTTPLAN                bool                `json:"unsafe_http_lan"`
+	RememberedAutoConnectEnabled bool                 `json:"remembered_auto_connect_enabled"`
+	UnsafeHTTPLAN                bool                 `json:"unsafe_http_lan"`
+	Clipboard                    ClipboardStatus      `json:"clipboard"`
+	FileTransfers                []FileTransferStatus `json:"file_transfers"`
+	FileDownloadDir              string               `json:"file_download_dir"`
+	MouseSpeed                   float64              `json:"mouse_speed"`
+	ScrollSpeed                  float64              `json:"scroll_speed"`
 }
 
 // State returns the public status view safe to expose over LAN HTTP.
@@ -114,6 +119,7 @@ func (d *Daemon) stateSnapshot(includeDisplayPIN bool) StatusSnapshot {
 	activeTarget := d.ctrl.ActiveTarget()
 	paused := d.Paused()
 	captureEnabled := d.CaptureEnabled()
+	mouseSpeed, scrollSpeed := d.PointerSpeeds()
 
 	return StatusSnapshot{
 		Daemon: DaemonInfo{
@@ -133,5 +139,10 @@ func (d *Daemon) stateSnapshot(includeDisplayPIN bool) StatusSnapshot {
 		CaptureEnabled:               captureEnabled,
 		RememberedAutoConnectEnabled: d.cfg.RememberedAutoConnectEnabled,
 		UnsafeHTTPLAN:                d.cfg.UnsafeHTTPLAN,
+		Clipboard:                    d.ClipboardStatusSnapshot(),
+		FileTransfers:                d.FileTransfersSnapshot(),
+		FileDownloadDir:              d.FileDownloadDir(),
+		MouseSpeed:                   mouseSpeed,
+		ScrollSpeed:                  scrollSpeed,
 	}
 }

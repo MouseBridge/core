@@ -18,7 +18,9 @@ type Conn struct {
 
 // NewConn wraps an existing net.Conn.
 func NewConn(raw net.Conn) *Conn {
-	return &Conn{raw: raw, scanner: bufio.NewScanner(raw)}
+	sc := bufio.NewScanner(raw)
+	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	return &Conn{raw: raw, scanner: sc}
 }
 
 // Send serialises msg as a JSON Line and writes it.

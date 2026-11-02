@@ -9,10 +9,11 @@ const defaultDwell = 50 * time.Millisecond
 
 // SwitchEvent is emitted when the active target changes.
 type SwitchEvent struct {
-	TargetID  string
-	Trigger   string // "edge"|"hotkey"
-	Edge      string
-	EntryPct  float64
+	PreviousTargetID string
+	TargetID         string
+	Trigger          string // "edge"|"hotkey"
+	Edge             string
+	EntryPct         float64
 }
 
 // Controller manages which device currently receives input.
@@ -54,7 +55,7 @@ func (c *Controller) SwitchTo(deviceID string) {
 	cb := c.OnSwitch
 	c.mu.Unlock()
 	if prev != deviceID && cb != nil {
-		cb(SwitchEvent{TargetID: deviceID, Trigger: "hotkey"})
+		cb(SwitchEvent{PreviousTargetID: prev, TargetID: deviceID, Trigger: "hotkey"})
 	}
 }
 
@@ -78,10 +79,11 @@ func (c *Controller) TryEdgeSwitch(deviceID, edge string, entryPct float64) bool
 		return false
 	}
 	c.edgePending = ""
+	prev := c.activeTarget
 	c.activeTarget = deviceID
 	cb := c.OnSwitch
 	if cb != nil {
-		go cb(SwitchEvent{TargetID: deviceID, Trigger: "edge", Edge: edge, EntryPct: entryPct})
+		go cb(SwitchEvent{PreviousTargetID: prev, TargetID: deviceID, Trigger: "edge", Edge: edge, EntryPct: entryPct})
 	}
 	return true
 }

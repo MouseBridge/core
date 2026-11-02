@@ -31,6 +31,18 @@ type SessionHost interface {
 	PushHelperInput(input helper.InputPayload)
 }
 
+// ClipboardSessionHost is an optional interface implemented by SessionHost for clipboard sync.
+type ClipboardSessionHost interface {
+	HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncPayload)
+}
+
+// FileTransferSessionHost is an optional interface implemented by SessionHost for file transfer.
+type FileTransferSessionHost interface {
+	HandleFileStart(deviceID string, pay event.FileStartPayload)
+	HandleFileChunk(deviceID string, pay event.FileChunkPayload)
+	HandleFileEnd(deviceID string, pay event.FileEndPayload)
+}
+
 // RunSession runs the message loop for an authenticated session.
 // role is "server" or "client".
 func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, emit func(BusEvent)) {
@@ -152,6 +164,34 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 
 		case event.TypeSwitchAck:
 			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_ack from %s latency=%.1fms", name, latency)})
+
+		case event.TypeClipboardSync:
+			var pay event.ClipboardSyncPayload
+			_ = event.DecodePayload(msg, &pay)
+			if ch, ok := h.(ClipboardSessionHost); ok {
+				ch.HandleRemoteClipboard(deviceID, pay)
+			}
+
+		case event.TypeFileStart:
+			var pay event.FileStartPayload
+			_ = event.DecodePayload(msg, &pay)
+			if fh, ok := h.(FileTransferSessionHost); ok {
+				fh.HandleFileStart(deviceID, pay)
+			}
+
+		case event.TypeFileChunk:
+			var pay event.FileChunkPayload
+			_ = event.DecodePayload(msg, &pay)
+			if fh, ok := h.(FileTransferSessionHost); ok {
+				fh.HandleFileChunk(deviceID, pay)
+			}
+
+		case event.TypeFileEnd:
+			var pay event.FileEndPayload
+			_ = event.DecodePayload(msg, &pay)
+			if fh, ok := h.(FileTransferSessionHost); ok {
+				fh.HandleFileEnd(deviceID, pay)
+			}
 
 		default:
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv %s latency=%.1fms", msg.Type, latency))

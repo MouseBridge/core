@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -267,6 +269,39 @@ func (s *Server) handleShortcutsPut(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func (s *Server) handlePointerGet(c *gin.Context) {
+	mouseSpeed, scrollSpeed := s.d.PointerSpeeds()
+	c.JSON(http.StatusOK, gin.H{
+		"mouse_speed":  mouseSpeed,
+		"scroll_speed": scrollSpeed,
+	})
+}
+
+func (s *Server) handlePointerPut(c *gin.Context) {
+	var req struct {
+		MouseSpeed  *float64 `json:"mouse_speed"`
+		ScrollSpeed *float64 `json:"scroll_speed"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+	if req.MouseSpeed == nil && req.ScrollSpeed == nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "mouse_speed or scroll_speed is required"))
+		return
+	}
+	mouseSpeed, scrollSpeed, err := s.d.UpdatePointerSpeeds(req.MouseSpeed, req.ScrollSpeed)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok":           true,
+		"mouse_speed":  mouseSpeed,
+		"scroll_speed": scrollSpeed,
+	})
+}
+
 func (s *Server) handleControlSwitchToHost(c *gin.Context) {
 	s.d.SwitchToHost()
 	state := s.d.State()
@@ -463,4 +498,100 @@ func validateSessionInputKind(kind string) error {
 	default:
 		return fmt.Errorf("kind must be mouse_move, mouse_move_abs, mouse_button, key_down, key_up, key_tap, scroll, or text")
 	}
+}
+
+func (s *Server) handleClipboardGet(c *gin.Context) {
+	c.JSON(http.StatusOK, s.d.ClipboardStatusSnapshot())
+}
+
+func (s *Server) handleClipboardSettingsPut(c *gin.Context) {
+	var req struct {
+		Enabled         *bool `json:"enabled"`
+		AllowServerSync *bool `json:"allow_server_sync"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+	status := s.d.UpdateClipboardSettings(req.Enabled, req.AllowServerSync)
+	c.JSON(http.StatusOK, status)
+}
+
+func (s *Server) handleClipboardSend(c *gin.Context) {
+	var req struct {
+		DeviceID string `json:"device_id"`
+		Text     string `json:"text"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+	status, err := s.d.SendClipboard(req.DeviceID, req.Text)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("clipboard_send_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "clipboard": status})
+}
+
+func (s *Server) handleFilesGet(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"download_dir": s.d.FileDownloadDir(),
+		"transfers":    s.d.FileTransfersSnapshot(),
+	})
+}
+
+func (s *Server) handleFilesSettingsPut(c *gin.Context) {
+	var req struct {
+		DownloadDir string `json:"download_dir"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.DownloadDir) == "" {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "download_dir is required"))
+		return
+	}
+	resolved, err := s.d.SetFileDownloadDir(req.DownloadDir)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "download_dir": resolved})
+}
+
+func (s *Server) handleFilesSend(c *gin.Context) {
+	var req struct {
+		DeviceID   string `json:"device_id"`
+		FilePath   string `json:"file_path"`
+		FileName   string `json:"file_name"`
+		DataBase64 string `json:"data_base64"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
+		return
+	}
+
+	if strings.TrimSpace(req.FilePath) != "" {
+		st, err := s.d.SendFileFromPath(req.DeviceID, req.FilePath)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, apiErr("file_send_failed", err.Error()))
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "transfer": st})
+		return
+	}
+
+	if strings.TrimSpace(req.FileName) == "" {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "file_path or file_name is required"))
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(req.DataBase64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid data_base64"))
+		return
+	}
+	st, err := s.d.SendFileFromBytes(req.DeviceID, req.FileName, raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("file_send_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "transfer": st})
 }

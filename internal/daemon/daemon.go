@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -56,6 +57,17 @@ type Daemon struct {
 	paused         bool
 	captureMu      sync.RWMutex
 	captureEnabled bool
+
+	clipMu     sync.RWMutex
+	clipStatus ClipboardStatus
+
+	fileMu          sync.Mutex
+	fileDownloadDir string
+	fileTransfers   map[string]*FileTransferStatus
+	activeReceives  map[string]*activeFileReceive
+
+	heldKeysMu     sync.Mutex
+	heldRemoteKeys map[string]map[int64]bool
 
 	sessMu   sync.RWMutex
 	sessions map[string]*sessionEntry // keyed by connectionID
@@ -143,6 +155,14 @@ func New(opts Options) (*Daemon, error) {
 		manualDisconnect:  make(map[string]bool),
 		httpConnCh:        make(chan net.Conn, 64),
 		captureEnabled:    true,
+		clipStatus: ClipboardStatus{
+			Enabled:         true,
+			AllowServerSync: true,
+		},
+		fileDownloadDir: filepath.Join(opts.DataDir, "received"),
+		fileTransfers:   make(map[string]*FileTransferStatus),
+		activeReceives:  make(map[string]*activeFileReceive),
+		heldRemoteKeys:  make(map[string]map[int64]bool),
 	}
 	d.ctrl = switch_.NewController(identity.DeviceID)
 	d.ctrl.OnSwitch = d.handleSwitchEvent
@@ -207,6 +227,7 @@ func (d *Daemon) Start() error {
 	})
 
 	go transport.Serve(ln, d.handleP2P, d.handleHTTP)
+	go d.runClipboardWatcher(ctx)
 
 	d.broadcast(BusEvent{Kind: "listening"})
 	d.helper.BroadcastConfig()
@@ -545,6 +566,69 @@ func (d *Daemon) UpdateHotkeys(h config.Hotkeys) error {
 	return nil
 }
 
+// PointerSpeeds returns the configured mouse movement and scroll amplification multipliers.
+func (d *Daemon) PointerSpeeds() (float64, float64) {
+	d.pausedMu.RLock()
+	defer d.pausedMu.RUnlock()
+	mouseSpeed := d.cfg.MouseSpeed
+	scrollSpeed := d.cfg.ScrollSpeed
+	if mouseSpeed <= 0 {
+		mouseSpeed = config.Default().MouseSpeed
+	}
+	if scrollSpeed <= 0 {
+		scrollSpeed = config.Default().ScrollSpeed
+	}
+	return mouseSpeed, scrollSpeed
+}
+
+// UpdatePointerSpeeds updates mouse movement and/or scroll amplification multipliers,
+// persists them to config.json, and pushes the updated snapshot to helpers and UI.
+func (d *Daemon) UpdatePointerSpeeds(mouseSpeed, scrollSpeed *float64) (float64, float64, error) {
+	d.pausedMu.Lock()
+	nextMouse := d.cfg.MouseSpeed
+	if nextMouse <= 0 {
+		nextMouse = config.Default().MouseSpeed
+	}
+	nextScroll := d.cfg.ScrollSpeed
+	if nextScroll <= 0 {
+		nextScroll = config.Default().ScrollSpeed
+	}
+	if mouseSpeed != nil {
+		v := *mouseSpeed
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0.2 || v > 6.0 {
+			d.pausedMu.Unlock()
+			return nextMouse, nextScroll, fmt.Errorf("mouse_speed must be between 0.2 and 6.0")
+		}
+		nextMouse = math.Round(v*100) / 100
+	}
+	if scrollSpeed != nil {
+		v := *scrollSpeed
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0.2 || v > 10.0 {
+			d.pausedMu.Unlock()
+			return nextMouse, nextScroll, fmt.Errorf("scroll_speed must be between 0.2 and 10.0")
+		}
+		nextScroll = math.Round(v*100) / 100
+	}
+	d.cfg.MouseSpeed = nextMouse
+	d.cfg.ScrollSpeed = nextScroll
+	if d.configPath != "" {
+		if err := d.cfg.Save(d.configPath); err != nil {
+			d.pausedMu.Unlock()
+			return nextMouse, nextScroll, err
+		}
+	}
+	d.pausedMu.Unlock()
+
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+	d.broadcast(BusEvent{
+		Kind: "log",
+		Msg:  fmt.Sprintf("pointer speeds updated mouse_speed=%.2f scroll_speed=%.2f", nextMouse, nextScroll),
+	})
+	return nextMouse, nextScroll, nil
+}
+
 // Identity returns the device identity.
 func (d *Daemon) Identity() device.Identity { return d.identity }
 
@@ -689,6 +773,7 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 		})
 	}
 	d.sessMu.RUnlock()
+	mouseSpeed, scrollSpeed := d.PointerSpeeds()
 
 	return helper.ConfigPushPayload{
 		Daemon: helper.DaemonInfo{
@@ -713,6 +798,8 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 		ActiveTarget:   d.ctrl.ActiveTarget(),
 		Paused:         d.Paused(),
 		CaptureEnabled: d.CaptureEnabled(),
+		MouseSpeed:     mouseSpeed,
+		ScrollSpeed:    scrollSpeed,
 	}
 }
 
@@ -785,20 +872,102 @@ func (d *Daemon) SendSessionInput(deviceID string, input helper.InputPayload) er
 		return err
 	}
 
+	var matchedPeer string
 	d.connsMu.Lock()
-	defer d.connsMu.Unlock()
 	for c, id := range d.conns {
 		if deviceID != "" && id != deviceID {
 			continue
 		}
 		for _, msg := range msgs {
 			if err := c.Send(msg); err != nil {
+				d.connsMu.Unlock()
 				return err
 			}
 		}
+		matchedPeer = id
+		d.connsMu.Unlock()
+		if matchedPeer == "" {
+			matchedPeer = deviceID
+		}
+		switch input.Kind {
+		case "key_down":
+			d.recordRemoteKeyDown(matchedPeer, input.KeyCode)
+		case "key_up", "key_tap":
+			d.recordRemoteKeyUp(matchedPeer, input.KeyCode)
+		}
 		return nil
 	}
+	d.connsMu.Unlock()
 	return fmt.Errorf("no active session for device %q", deviceID)
+}
+
+func (d *Daemon) recordRemoteKeyDown(deviceID string, keyCode int64) {
+	if deviceID == "" {
+		return
+	}
+	d.heldKeysMu.Lock()
+	defer d.heldKeysMu.Unlock()
+	if d.heldRemoteKeys[deviceID] == nil {
+		d.heldRemoteKeys[deviceID] = make(map[int64]bool)
+	}
+	d.heldRemoteKeys[deviceID][keyCode] = true
+}
+
+func (d *Daemon) recordRemoteKeyUp(deviceID string, keyCode int64) {
+	if deviceID == "" {
+		return
+	}
+	d.heldKeysMu.Lock()
+	defer d.heldKeysMu.Unlock()
+	if set := d.heldRemoteKeys[deviceID]; set != nil {
+		delete(set, keyCode)
+		if len(set) == 0 {
+			delete(d.heldRemoteKeys, deviceID)
+		}
+	}
+}
+
+func (d *Daemon) releaseRemoteKeys(deviceID string) {
+	d.heldKeysMu.Lock()
+	var targets map[string][]int64
+	if deviceID != "" {
+		if set := d.heldRemoteKeys[deviceID]; len(set) > 0 {
+			codes := make([]int64, 0, len(set))
+			for code := range set {
+				codes = append(codes, code)
+			}
+			slices.Sort(codes)
+			targets = map[string][]int64{deviceID: codes}
+		}
+		delete(d.heldRemoteKeys, deviceID)
+	} else {
+		for peerID, set := range d.heldRemoteKeys {
+			if len(set) == 0 {
+				continue
+			}
+			if targets == nil {
+				targets = make(map[string][]int64)
+			}
+			codes := make([]int64, 0, len(set))
+			for code := range set {
+				codes = append(codes, code)
+			}
+			slices.Sort(codes)
+			targets[peerID] = codes
+		}
+		d.heldRemoteKeys = make(map[string]map[int64]bool)
+	}
+	d.heldKeysMu.Unlock()
+
+	for peerID, codes := range targets {
+		for _, code := range codes {
+			_ = d.SendSessionInput(peerID, helper.InputPayload{
+				Kind:      "key_up",
+				KeyCode:   code,
+				Modifiers: 0,
+			})
+		}
+	}
 }
 
 func helperSocketPath(dataDir string, port int) string {
@@ -899,6 +1068,9 @@ func (d *Daemon) TogglePause() bool {
 	d.paused = !d.paused
 	paused := d.paused
 	d.pausedMu.Unlock()
+	if paused {
+		d.releaseRemoteKeys("")
+	}
 	d.broadcast(BusEvent{Kind: "log", Msg: fmt.Sprintf("helper pause toggled paused=%t", paused)})
 	if d.helper != nil {
 		d.helper.BroadcastConfig()
@@ -915,6 +1087,9 @@ func (d *Daemon) SetCaptureEnabled(enabled bool) bool {
 	changed := d.captureEnabled != enabled
 	d.captureEnabled = enabled
 	d.captureMu.Unlock()
+	if !enabled {
+		d.releaseRemoteKeys("")
+	}
 	if changed {
 		d.broadcast(BusEvent{Kind: "log", Msg: fmt.Sprintf("helper capture enabled=%t", enabled)})
 		if d.helper != nil {
@@ -929,6 +1104,7 @@ func (d *Daemon) togglePause() {
 }
 
 func (d *Daemon) disconnectAll() {
+	d.releaseRemoteKeys("")
 	d.connsMu.Lock()
 	conns := make([]*transport.Conn, 0, len(d.conns))
 	devices := make([]string, 0, len(d.conns))
@@ -1125,6 +1301,9 @@ func (d *Daemon) hasSessionDevice(deviceID string) bool {
 }
 
 func (d *Daemon) handleSwitchEvent(ev switch_.SwitchEvent) {
+	if ev.PreviousTargetID != "" && ev.PreviousTargetID != d.identity.DeviceID && ev.PreviousTargetID != ev.TargetID {
+		d.releaseRemoteKeys(ev.PreviousTargetID)
+	}
 	d.broadcast(BusEvent{
 		Kind: "log",
 		Msg:  fmt.Sprintf("switch target=%s trigger=%s", ev.TargetID, ev.Trigger),

@@ -38,6 +38,8 @@ type ConfigPushPayload struct {
 	ActiveTarget   string            `json:"active_target"`
 	Paused         bool              `json:"paused"`
 	CaptureEnabled bool              `json:"capture_enabled"`
+	MouseSpeed     float64           `json:"mouse_speed"`
+	ScrollSpeed    float64           `json:"scroll_speed"`
 }
 
 // DaemonInfo identifies the local daemon the helper is attached to.

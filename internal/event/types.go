@@ -28,6 +28,10 @@ const (
 	TypeSwitchRequest = "switch_request"
 	TypeSwitchAck     = "switch_ack"
 	TypeSwitchBack    = "switch_back"
+	TypeClipboardSync = "clipboard_sync"
+	TypeFileStart     = "file_start"
+	TypeFileChunk     = "file_chunk"
+	TypeFileEnd       = "file_end"
 )
 
 // Message is the envelope for every wire message.
@@ -155,4 +159,33 @@ type SwitchRequestPayload struct {
 	Edge      string  `json:"edge,omitempty"`
 	EntryPct  float64 `json:"entry_pct,omitempty"`
 	Direction string  `json:"direction,omitempty"`
+}
+
+// ClipboardSyncPayload carries text clipboard content across a P2P session.
+type ClipboardSyncPayload struct {
+	Text       string `json:"text"`
+	ContentSHA string `json:"content_sha"`
+	SourceID   string `json:"source_id,omitempty"`
+}
+
+// FileStartPayload initiates a chunked file transfer over a P2P session.
+type FileStartPayload struct {
+	TransferID string `json:"transfer_id"`
+	FileName   string `json:"file_name"`
+	TotalBytes int64  `json:"total_bytes"`
+	SHA256     string `json:"sha256,omitempty"`
+}
+
+// FileChunkPayload carries one base64-encoded chunk of a file transfer.
+type FileChunkPayload struct {
+	TransferID string `json:"transfer_id"`
+	Offset     int64  `json:"offset"`
+	DataBase64 string `json:"data_base64"`
+}
+
+// FileEndPayload finalizes a file transfer and carries its expected SHA-256 digest.
+type FileEndPayload struct {
+	TransferID string `json:"transfer_id"`
+	SHA256     string `json:"sha256"`
+	Canceled   bool   `json:"canceled,omitempty"`
 }

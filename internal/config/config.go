@@ -26,6 +26,8 @@ type Config struct {
 
 	ConnectTimeoutSeconds int         `json:"connect_timeout_seconds"`
 	JSONBodyLimitBytes    int64       `json:"json_body_limit_bytes"`
+	MouseSpeed            float64     `json:"mouse_speed"`
+	ScrollSpeed           float64     `json:"scroll_speed"`
 	Hotkeys               Hotkeys     `json:"hotkeys"`
 	EdgeTargets           EdgeTargets `json:"edge_targets"`
 
@@ -62,6 +64,8 @@ func Default() *Config {
 		PairingPINMaxAttempts:        3,
 		ConnectTimeoutSeconds:        5,
 		JSONBodyLimitBytes:           65536,
+		MouseSpeed:                   1.5,
+		ScrollSpeed:                  2.0,
 		Hotkeys: Hotkeys{
 			SwitchNext:    "ctrl+alt+right",
 			SwitchPrev:    "ctrl+alt+left",
@@ -144,6 +148,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Hotkeys.TogglePause == "" {
 		cfg.Hotkeys.TogglePause = Default().Hotkeys.TogglePause
+	}
+	if cfg.MouseSpeed <= 0 {
+		cfg.MouseSpeed = Default().MouseSpeed
+	}
+	if cfg.ScrollSpeed <= 0 {
+		cfg.ScrollSpeed = Default().ScrollSpeed
 	}
 	return cfg, nil
 }

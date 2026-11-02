@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -70,6 +71,8 @@ func (s *Server) routes(r *gin.Engine) {
 	api.PUT("/remembered/settings", s.handleRememberedSettingsPut)
 	api.GET("/shortcuts", s.handleShortcutsGet)
 	api.PUT("/shortcuts", s.handleShortcutsPut)
+	api.GET("/pointer", s.handlePointerGet)
+	api.PUT("/pointer", s.handlePointerPut)
 	api.POST("/control/switch-to-host", s.handleControlSwitchToHost)
 	api.POST("/control/switch-next", s.handleControlSwitchNext)
 	api.POST("/control/switch-prev", s.handleControlSwitchPrev)
@@ -80,6 +83,12 @@ func (s *Server) routes(r *gin.Engine) {
 	api.POST("/helper/input/batch", s.handleHelperInputBatch)
 	api.POST("/session/input", s.handleSessionInput)
 	api.POST("/session/input/batch", s.handleSessionInputBatch)
+	api.GET("/clipboard", s.handleClipboardGet)
+	api.PUT("/clipboard/settings", s.handleClipboardSettingsPut)
+	api.POST("/clipboard/send", s.handleClipboardSend)
+	api.GET("/files", s.handleFilesGet)
+	api.PUT("/files/settings", s.handleFilesSettingsPut)
+	api.POST("/files/send", s.handleFilesSend)
 
 	local := api.Group("/local")
 	local.Use(localOnlyMiddleware())
@@ -158,7 +167,13 @@ func localOnlyMiddleware() gin.HandlerFunc {
 
 func bodyLimitMiddleware(limit int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+		maxBytes := limit
+		if strings.HasPrefix(c.Request.URL.Path, "/api/files/") {
+			maxBytes = 128 * 1024 * 1024 // 128 MB for file upload
+		} else if strings.HasPrefix(c.Request.URL.Path, "/api/clipboard/") {
+			maxBytes = 4 * 1024 * 1024 // 4 MB for clipboard text
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 		c.Next()
 	}
 }
