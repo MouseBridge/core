@@ -23,12 +23,57 @@ import (
 
 // ClipboardStatus represents the current state of cross-machine clipboard synchronization.
 type ClipboardStatus struct {
-	Enabled         bool   `json:"enabled"`
-	AllowServerSync bool   `json:"allow_server_sync"`
-	LastText        string `json:"last_text,omitempty"`
-	LastSHA256      string `json:"last_sha256,omitempty"`
-	LastSourceID    string `json:"last_source_id,omitempty"`
-	UpdatedAt       int64  `json:"updated_at,omitempty"`
+	Enabled             bool      `json:"enabled"`
+	AllowServerSync     bool      `json:"allow_server_sync"`
+	LastText            string    `json:"last_text,omitempty"`
+	LastSHA256          string    `json:"last_sha256,omitempty"`
+	LastSourceID        string    `json:"last_source_id,omitempty"`
+	UpdatedAt           int64     `json:"updated_at,omitempty"`
+	lastSystemWriteSHA  string    `json:"-"`
+	lastRemoteReceiveAt time.Time `json:"-"`
+}
+
+func darwinUTF8Env() []string {
+	base := os.Environ()
+	filtered := make([]string, 0, len(base)+3)
+	for _, kv := range base {
+		if strings.HasPrefix(kv, "LANG=") ||
+			strings.HasPrefix(kv, "LC_ALL=") ||
+			strings.HasPrefix(kv, "LC_CTYPE=") ||
+			strings.HasPrefix(kv, "__CF_USER_TEXT_ENCODING=") {
+			continue
+		}
+		filtered = append(filtered, kv)
+	}
+	return append(filtered,
+		"LANG=en_US.UTF-8",
+		"LC_ALL=en_US.UTF-8",
+		"LC_CTYPE=UTF-8",
+	)
+}
+
+func readSystemClipboard() (string, error) {
+	if runtime.GOOS != "darwin" {
+		return "", fmt.Errorf("system clipboard unsupported on %s", runtime.GOOS)
+	}
+	cmd := exec.Command("/usr/bin/pbpaste", "-Prefer", "txt")
+	cmd.Env = darwinUTF8Env()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.ToValidUTF8(string(out), ""), nil
+}
+
+func writeSystemClipboard(text string) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	clean := strings.ToValidUTF8(text, "")
+	cmd := exec.Command("/usr/bin/pbcopy")
+	cmd.Env = darwinUTF8Env()
+	cmd.Stdin = strings.NewReader(clean)
+	return cmd.Run()
 }
 
 // FileTransferStatus represents the state of an outgoing or incoming file transfer.
@@ -96,12 +141,17 @@ func (d *Daemon) UpdateClipboardSettings(enabled *bool, allowServerSync *bool) C
 // SendClipboard sends clipboard text to a specific connected peer (or all peers if targetDeviceID is empty).
 func (d *Daemon) SendClipboard(targetDeviceID string, text string) (ClipboardStatus, error) {
 	if text == "" && runtime.GOOS == "darwin" {
-		if out, err := exec.Command("pbpaste").Output(); err == nil {
-			text = string(out)
+		if out, err := readSystemClipboard(); err == nil {
+			text = out
 		}
 	}
+	text = strings.ToValidUTF8(text, "")
 	if text == "" {
 		return d.ClipboardStatusSnapshot(), fmt.Errorf("clipboard text is empty")
+	}
+	const maxClipboardBytes = 512 * 1024
+	if len(text) > maxClipboardBytes {
+		text = strings.ToValidUTF8(text[:maxClipboardBytes], "")
 	}
 
 	d.clipMu.Lock()
@@ -114,6 +164,7 @@ func (d *Daemon) SendClipboard(targetDeviceID string, text string) (ClipboardSta
 	now := time.Now().UnixMilli()
 	d.clipStatus.LastText = text
 	d.clipStatus.LastSHA256 = sha
+	d.clipStatus.lastSystemWriteSHA = sha
 	d.clipStatus.LastSourceID = d.identity.DeviceID
 	d.clipStatus.UpdatedAt = now
 	snap := d.clipStatus
@@ -161,13 +212,11 @@ func (d *Daemon) SendClipboard(targetDeviceID string, text string) (ClipboardSta
 
 // HandleRemoteClipboard processes incoming clipboard_sync messages from a connected peer.
 func (d *Daemon) HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncPayload) {
-	if pay.Text == "" {
+	cleanText := strings.ToValidUTF8(pay.Text, "")
+	if cleanText == "" {
 		return
 	}
-	sha := pay.ContentSHA
-	if sha == "" {
-		sha = sha256Hex([]byte(pay.Text))
-	}
+	sha := sha256Hex([]byte(cleanText))
 
 	d.clipMu.Lock()
 	if !d.clipStatus.Enabled || !d.clipStatus.AllowServerSync {
@@ -175,26 +224,34 @@ func (d *Daemon) HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncP
 		return
 	}
 	// Anti-loop guard: ignore if content hash matches the last synced clipboard.
-	if d.clipStatus.LastSHA256 != "" && d.clipStatus.LastSHA256 == sha {
+	if (d.clipStatus.LastSHA256 != "" && d.clipStatus.LastSHA256 == sha) ||
+		(d.clipStatus.lastSystemWriteSHA != "" && d.clipStatus.lastSystemWriteSHA == sha) {
 		d.clipMu.Unlock()
 		return
 	}
-	d.clipStatus.LastText = pay.Text
+	d.clipStatus.LastText = cleanText
 	d.clipStatus.LastSHA256 = sha
+	d.clipStatus.lastSystemWriteSHA = sha
+	d.clipStatus.lastRemoteReceiveAt = time.Now()
 	d.clipStatus.LastSourceID = deviceID
 	d.clipStatus.UpdatedAt = time.Now().UnixMilli()
 	d.clipMu.Unlock()
 
 	if os.Getenv("MB_SYNC_SYSTEM_CLIPBOARD") == "1" && runtime.GOOS == "darwin" {
-		cmd := exec.Command("pbcopy")
-		cmd.Stdin = strings.NewReader(pay.Text)
-		_ = cmd.Run()
+		_ = writeSystemClipboard(cleanText)
+		if actual, err := readSystemClipboard(); err == nil && actual != "" {
+			actualSHA := sha256Hex([]byte(actual))
+			d.clipMu.Lock()
+			d.clipStatus.lastSystemWriteSHA = actualSHA
+			d.clipStatus.lastRemoteReceiveAt = time.Now()
+			d.clipMu.Unlock()
+		}
 	}
 
 	d.broadcast(BusEvent{
 		Kind:     "clipboard_received",
 		DeviceID: deviceID,
-		Msg:      pay.Text,
+		Msg:      cleanText,
 	})
 }
 
@@ -203,8 +260,8 @@ func (d *Daemon) runClipboardWatcher(ctx context.Context) {
 		return
 	}
 	var lastObservedSHA string
-	if out, err := exec.Command("pbpaste").Output(); err == nil && len(out) > 0 {
-		lastObservedSHA = sha256Hex(out)
+	if out, err := readSystemClipboard(); err == nil && len(out) > 0 {
+		lastObservedSHA = sha256Hex([]byte(out))
 	}
 	ticker := time.NewTicker(400 * time.Millisecond)
 	defer ticker.Stop()
@@ -217,17 +274,20 @@ func (d *Daemon) runClipboardWatcher(ctx context.Context) {
 			if !snap.Enabled || len(d.targetConns("")) == 0 {
 				continue
 			}
-			out, err := exec.Command("pbpaste").Output()
+			if !snap.lastRemoteReceiveAt.IsZero() && time.Since(snap.lastRemoteReceiveAt) < 900*time.Millisecond {
+				continue
+			}
+			out, err := readSystemClipboard()
 			if err != nil || len(out) == 0 {
 				continue
 			}
-			sha := sha256Hex(out)
-			if sha == lastObservedSHA || sha == snap.LastSHA256 {
+			sha := sha256Hex([]byte(out))
+			if sha == lastObservedSHA || sha == snap.LastSHA256 || (snap.lastSystemWriteSHA != "" && sha == snap.lastSystemWriteSHA) {
 				lastObservedSHA = sha
 				continue
 			}
 			lastObservedSHA = sha
-			_, _ = d.SendClipboard("", string(out))
+			_, _ = d.SendClipboard("", out)
 		}
 	}
 }

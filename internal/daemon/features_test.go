@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -299,5 +300,36 @@ func TestPointerSpeedConfiguration(t *testing.T) {
 	badScroll := 0.05
 	if _, _, err := d.UpdatePointerSpeeds(nil, &badScroll); err == nil {
 		t.Fatalf("expected error for out-of-range scroll_speed")
+	}
+}
+
+func TestDarwinClipboardUTF8UnderGUIEnv(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only pbpaste/pbcopy UTF-8 test")
+	}
+	orig, _ := readSystemClipboard()
+	defer func() {
+		if orig != "" {
+			_ = writeSystemClipboard(orig)
+		}
+	}()
+
+	// Simulate macOS GUI LaunchServices environment where LANG is unset and
+	// __CF_USER_TEXT_ENCODING defaults to MacRoman (0:0).
+	t.Setenv("LANG", "")
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
+	t.Setenv("__CF_USER_TEXT_ENCODING", "0x1F5:0:0")
+
+	sample := "主控端复制在被控端粘贴绝不乱码 — 12345 🚀 日本語テスト"
+	if err := writeSystemClipboard(sample); err != nil {
+		t.Fatalf("writeSystemClipboard: %v", err)
+	}
+	got, err := readSystemClipboard()
+	if err != nil {
+		t.Fatalf("readSystemClipboard: %v", err)
+	}
+	if got != sample {
+		t.Fatalf("clipboard UTF-8 roundtrip mismatch: got %q, want %q", got, sample)
 	}
 }
