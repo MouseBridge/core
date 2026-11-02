@@ -1,11 +1,14 @@
 package daemon
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"hash"
 	"io"
@@ -311,7 +314,7 @@ func (d *Daemon) FileDownloadDir() string {
 	dir := d.fileDownloadDir
 	d.fileMu.Unlock()
 	if dir == "" {
-		dir = filepath.Join(d.dataDir, "received")
+		dir = "~/Downloads/MouseBridge"
 	}
 	return expandHomePath(dir)
 }
@@ -328,7 +331,26 @@ func (d *Daemon) SetFileDownloadDir(dir string) (string, error) {
 	d.fileMu.Lock()
 	d.fileDownloadDir = resolved
 	d.fileMu.Unlock()
+	encoded, _ := json.Marshal(struct {
+		DownloadDir string `json:"download_dir"`
+	}{resolved})
+	if err := os.WriteFile(filepath.Join(d.dataDir, "file-transfer-settings.json"), encoded, 0o600); err != nil {
+		return "", fmt.Errorf("save download_dir: %w", err)
+	}
 	return resolved, nil
+}
+
+func (d *Daemon) loadFileDownloadDir() {
+	raw, err := os.ReadFile(filepath.Join(d.dataDir, "file-transfer-settings.json"))
+	if err != nil {
+		return
+	}
+	var settings struct {
+		DownloadDir string `json:"download_dir"`
+	}
+	if json.Unmarshal(raw, &settings) == nil && strings.TrimSpace(settings.DownloadDir) != "" {
+		d.fileDownloadDir = expandHomePath(settings.DownloadDir)
+	}
 }
 
 // FileTransfersSnapshot returns the recent file transfers sorted by most recent first.
@@ -517,7 +539,46 @@ func (d *Daemon) SendFileFromPath(targetDeviceID, filePath string) (FileTransfer
 		return FileTransferStatus{}, fmt.Errorf("stat file: %w", err)
 	}
 	if info.IsDir() {
-		return FileTransferStatus{}, fmt.Errorf("cannot send a directory directly")
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		root := filepath.Clean(filePath)
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if !entry.Type().IsRegular() {
+				return nil
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			f, err := zw.Create(filepath.ToSlash(filepath.Join(filepath.Base(root), rel)))
+			if err != nil {
+				return err
+			}
+			src, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			_, copyErr := io.Copy(f, src)
+			closeErr := src.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			return closeErr
+		})
+		if err != nil {
+			_ = zw.Close()
+			return FileTransferStatus{}, fmt.Errorf("zip directory: %w", err)
+		}
+		if err := zw.Close(); err != nil {
+			return FileTransferStatus{}, err
+		}
+		return d.SendFileFromBytes(targetDeviceID, filepath.Base(root)+".zip", buf.Bytes())
 	}
 
 	hasher := sha256.New()

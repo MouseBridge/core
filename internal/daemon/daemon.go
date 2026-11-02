@@ -159,7 +159,7 @@ func New(opts Options) (*Daemon, error) {
 			Enabled:         true,
 			AllowServerSync: true,
 		},
-		fileDownloadDir: filepath.Join(opts.DataDir, "received"),
+		fileDownloadDir: expandHomePath("~/Downloads/MouseBridge"),
 		fileTransfers:   make(map[string]*FileTransferStatus),
 		activeReceives:  make(map[string]*activeFileReceive),
 		heldRemoteKeys:  make(map[string]map[int64]bool),
@@ -176,6 +176,7 @@ func New(opts Options) (*Daemon, error) {
 	d.localHelper = localhelper.NewRuntime(opts.DataDir, d.helper.ClientCount)
 	d.localLab = locallab.NewRunner(opts.DataDir)
 	d.localValidation = localvalidate.NewRunner(opts.DataDir)
+	d.loadFileDownloadDir()
 	return d, nil
 }
 
