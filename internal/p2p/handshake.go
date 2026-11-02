@@ -103,6 +103,8 @@ func HandleInbound(c *transport.Conn, localID string, h ServerHost, sessionHost 
 			Payload: event.PairAcceptPayload{Remembered: true, Trusted: true, SecretID: rec.SecretID, PairSecret: rec.PairSecret},
 		})
 		_ = rem.UpdateLastSeen(claimedID, time.Now())
+		serverRole := "server"
+		_ = rem.Patch(claimedID, remembered.Patch{Role: &serverRole})
 		log.Printf("[p2p] remembered device %s (%s) matched receiver trust and auto-connected", peerName, claimedID[:12])
 		adopted = true
 		go RunSession(c, claimedID, peerName, "server", sessionHost, emit)
@@ -238,6 +240,7 @@ func buildAndSaveRemembered(deviceID, displayID, name, endpoint string, rem *rem
 		CreatedAt:          now,
 		LastSeenAt:         now,
 		Endpoint:           endpoint,
+		Role:               "server",
 	}
 	return rec, rem.Add(rec)
 }

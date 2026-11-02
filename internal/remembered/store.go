@@ -23,6 +23,7 @@ type Record struct {
 	CreatedAt          time.Time `json:"created_at"`
 	LastSeenAt         time.Time `json:"last_seen_at"`
 	Endpoint           string    `json:"endpoint,omitempty"`
+	Role               string    `json:"role,omitempty"`
 }
 
 // DTO is the API/SSE-safe view; never contains pair_secret or secret_id.
@@ -35,6 +36,7 @@ type DTO struct {
 	CreatedAt          int64  `json:"created_at"`
 	LastSeenAt         int64  `json:"last_seen_at"`
 	Endpoint           string `json:"endpoint,omitempty"`
+	Role               string `json:"role,omitempty"`
 }
 
 func toDTO(r Record) DTO {
@@ -47,12 +49,14 @@ func toDTO(r Record) DTO {
 		CreatedAt:          r.CreatedAt.Unix(),
 		LastSeenAt:         r.LastSeenAt.Unix(),
 		Endpoint:           r.Endpoint,
+		Role:               r.Role,
 	}
 }
 
 type Patch struct {
 	Alias              *string
 	TrustedAutoConnect *bool
+	Role               *string
 }
 
 // Store is a concurrent-safe remembered device store with atomic persistence.
@@ -140,6 +144,9 @@ func (s *Store) Patch(deviceID string, patch Patch) error {
 	}
 	if patch.TrustedAutoConnect != nil {
 		rec.TrustedAutoConnect = *patch.TrustedAutoConnect
+	}
+	if patch.Role != nil {
+		rec.Role = *patch.Role
 	}
 	next[deviceID] = rec
 	err := s.persist(next)

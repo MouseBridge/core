@@ -56,6 +56,29 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 		RemoteIP: c.RemoteAddr().String(), Role: role})
 	log.Printf("[p2p] session active with %s (%s) role=%s", name, deviceID[:12], role)
 
+	stopPing := make(chan struct{})
+	defer close(stopPing)
+	go func() {
+		timer := time.NewTimer(80 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-stopPing:
+			return
+		case <-timer.C:
+			_ = c.Send(event.Message{V: 1, Seq: 1, Type: event.TypePing, Ts: time.Now().UnixMilli(), Payload: struct{}{}})
+		}
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopPing:
+				return
+			case <-ticker.C:
+				_ = c.Send(event.Message{V: 1, Seq: 1, Type: event.TypePing, Ts: time.Now().UnixMilli(), Payload: struct{}{}})
+			}
+		}
+	}()
+
 	var seq int64 = 10
 	for {
 		msg, err := c.Recv()
@@ -65,7 +88,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			return
 		}
 		latency := float64(time.Now().UnixMilli() - msg.Ts)
-		h.SessionRecordLatency(connID, latency)
+		if latency >= 0 && latency < 250 {
+			h.SessionRecordLatency(connID, latency)
+		}
 
 		switch msg.Type {
 		case event.TypeMouseMove:
@@ -151,7 +176,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			var pay event.PongPayload
 			_ = event.DecodePayload(msg, &pay)
 			rtt := float64(time.Now().UnixMilli() - pay.EchoTs)
-			h.SessionRecordLatency(connID, rtt)
+			if rtt >= 0 {
+				h.SessionRecordLatency(connID, rtt)
+			}
 			emitVerboseSessionLog(emit, fmt.Sprintf("pong rtt=%.1fms", rtt))
 
 		case event.TypeSwitchRequest:
@@ -253,7 +280,8 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 					_ = remStore.UpdateLastSeen(serverID, time.Now())
 					_ = remStore.UpdateEndpoint(serverID, c.RemoteAddr().String())
 					trusted := true
-					_ = remStore.Patch(serverID, remembered.Patch{TrustedAutoConnect: &trusted})
+					clientRole := "client"
+					_ = remStore.Patch(serverID, remembered.Patch{TrustedAutoConnect: &trusted, Role: &clientRole})
 				}
 				adopted = true
 				go RunSession(c, serverID, serverName, "client", h, emit)
@@ -274,6 +302,7 @@ func DialAndPair(c *transport.Conn, localID, localDisplayID, localName string,
 						CreatedAt:          now,
 						LastSeenAt:         now,
 						Endpoint:           c.RemoteAddr().String(),
+						Role:               "client",
 					})
 				}
 			}
