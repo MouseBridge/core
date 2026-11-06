@@ -119,9 +119,10 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			var pay event.MouseButtonPayload
 			_ = event.DecodePayload(msg, &pay)
 			h.PushHelperInput(helper.InputPayload{
-				Kind:    "mouse_button",
-				Button:  pay.Button,
-				Pressed: pay.Pressed,
+				Kind:       "mouse_button",
+				Button:     pay.Button,
+				Pressed:    pay.Pressed,
+				ClickCount: pay.ClickCount,
 			})
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv mouse_button button=%s pressed=%t latency=%.1fms", pay.Button, pay.Pressed, latency))
 

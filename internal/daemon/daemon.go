@@ -997,7 +997,7 @@ func sessionInputMessages(input helper.InputPayload) ([]event.Message, error) {
 		return []event.Message{base}, nil
 	case "mouse_button":
 		base.Type = event.TypeMouseButton
-		base.Payload = event.MouseButtonPayload{Button: input.Button, Pressed: input.Pressed}
+		base.Payload = event.MouseButtonPayload{Button: input.Button, Pressed: input.Pressed, ClickCount: input.ClickCount}
 		return []event.Message{base}, nil
 	case "key_down":
 		base.Type = event.TypeKeyDown

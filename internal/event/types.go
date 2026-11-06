@@ -126,8 +126,9 @@ type MouseMoveAbsPayload struct {
 
 // MouseButtonPayload carries button press/release.
 type MouseButtonPayload struct {
-	Button  string `json:"button"`
-	Pressed bool   `json:"pressed"`
+	Button     string `json:"button"`
+	Pressed    bool   `json:"pressed"`
+	ClickCount int    `json:"click_count,omitempty"`
 }
 
 // KeyDownPayload carries a key press.
