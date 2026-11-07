@@ -26,7 +26,29 @@ func startConnectedDaemonPair(t *testing.T) (*Daemon, *Daemon, func()) {
 		t.Fatalf("New d2: %v", err)
 	}
 
-	c1, c2 := net.Pipe()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer ln.Close()
+
+	var c1 net.Conn
+	var acceptErr error
+	acceptDone := make(chan struct{})
+	go func() {
+		c1, acceptErr = ln.Accept()
+		close(acceptDone)
+	}()
+
+	c2, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	<-acceptDone
+	if acceptErr != nil {
+		t.Fatalf("Accept: %v", acceptErr)
+	}
+
 	tc1 := transport.NewConn(c1)
 	tc2 := transport.NewConn(c2)
 
