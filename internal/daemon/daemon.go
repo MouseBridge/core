@@ -1026,6 +1026,10 @@ func sessionInputMessages(input helper.InputPayload) ([]event.Message, error) {
 		base.Type = event.TypeScroll
 		base.Payload = event.ScrollPayload{DX: input.DX, DY: input.DY}
 		return []event.Message{base}, nil
+	case "locate_cursor":
+		base.Type = event.TypeLocateCursor
+		base.Payload = map[string]interface{}{}
+		return []event.Message{base}, nil
 	default:
 		return nil, fmt.Errorf("unsupported session input kind %q", input.Kind)
 	}

@@ -25,6 +25,7 @@ const (
 	TypeKeyUp         = "key_up"
 	TypeText          = "text"
 	TypeScroll        = "scroll"
+	TypeLocateCursor  = "locate_cursor"
 	TypeSwitchRequest = "switch_request"
 	TypeSwitchAck     = "switch_ack"
 	TypeSwitchBack    = "switch_back"

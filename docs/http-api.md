@@ -193,6 +193,7 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 - `key_down`
 - `key_up`
 - `text`
+- `locate_cursor`（触发屏幕光标放大雷达定位）
 
 `/api/session/input` 支持：
 
@@ -204,6 +205,7 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 - `key_tap`
 - `text`
 - `scroll`
+- `locate_cursor`（向远程受控端发送光标放大雷达定位指令）
 
 ## SSE 事件
 

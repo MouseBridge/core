@@ -165,6 +165,12 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			})
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv scroll dx=%.1f dy=%.1f latency=%.1fms", pay.DX, pay.DY, latency))
 
+		case event.TypeLocateCursor:
+			h.PushHelperInput(helper.InputPayload{
+				Kind: "locate_cursor",
+			})
+			emitVerboseSessionLog(emit, fmt.Sprintf("recv locate_cursor latency=%.1fms", latency))
+
 		case event.TypePing:
 			_ = c.Send(event.Message{
 				V: 1, Seq: seq, Type: event.TypePong, Ts: time.Now().UnixMilli(),

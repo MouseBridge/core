@@ -487,19 +487,19 @@ func validateInputPayload(input helper.InputPayload) error {
 
 func validateHelperInputKind(kind string) error {
 	switch kind {
-	case "mouse_move", "mouse_move_abs", "mouse_button", "scroll", "key_tap", "key_down", "key_up", "text":
+	case "mouse_move", "mouse_move_abs", "mouse_button", "scroll", "key_tap", "key_down", "key_up", "text", "locate_cursor":
 		return nil
 	default:
-		return fmt.Errorf("kind must be mouse_move, mouse_move_abs, mouse_button, scroll, key_tap, key_down, key_up, or text")
+		return fmt.Errorf("kind must be mouse_move, mouse_move_abs, mouse_button, scroll, key_tap, key_down, key_up, text, or locate_cursor")
 	}
 }
 
 func validateSessionInputKind(kind string) error {
 	switch kind {
-	case "mouse_move", "mouse_move_abs", "mouse_button", "key_down", "key_up", "key_tap", "scroll", "text":
+	case "mouse_move", "mouse_move_abs", "mouse_button", "key_down", "key_up", "key_tap", "scroll", "text", "locate_cursor":
 		return nil
 	default:
-		return fmt.Errorf("kind must be mouse_move, mouse_move_abs, mouse_button, key_down, key_up, key_tap, scroll, or text")
+		return fmt.Errorf("kind must be mouse_move, mouse_move_abs, mouse_button, key_down, key_up, key_tap, scroll, text, or locate_cursor")
 	}
 }
 
