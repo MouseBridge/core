@@ -651,11 +651,21 @@ func (d *Daemon) UpdateShakeToLocate(enabled *bool, sensitivity *string) (bool, 
 	if sensitivity != nil {
 		s := strings.ToLower(strings.TrimSpace(*sensitivity))
 		switch s {
-		case "low", "medium", "high", "disabled":
-			d.cfg.ShakeSensitivity = s
+		case "lowest", "very_low", "minimal":
+			d.cfg.ShakeSensitivity = "lowest"
+		case "low":
+			d.cfg.ShakeSensitivity = "low"
+		case "medium", "standard", "normal":
+			d.cfg.ShakeSensitivity = "medium"
+		case "high":
+			d.cfg.ShakeSensitivity = "high"
+		case "highest", "ultra_high", "very_high":
+			d.cfg.ShakeSensitivity = "highest"
+		case "disabled", "off":
+			d.cfg.ShakeSensitivity = "disabled"
 		default:
 			d.pausedMu.Unlock()
-			return d.cfg.ShakeToLocateEnabled, d.cfg.ShakeSensitivity, fmt.Errorf("invalid shake_sensitivity: %q (must be low, medium, high, or disabled)", s)
+			return d.cfg.ShakeToLocateEnabled, d.cfg.ShakeSensitivity, fmt.Errorf("invalid shake_sensitivity: %q (must be lowest, low, medium, high, highest, or disabled)", s)
 		}
 	}
 	curEnabled := d.cfg.ShakeToLocateEnabled
