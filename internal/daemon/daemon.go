@@ -665,37 +665,54 @@ func (d *Daemon) UpdateShakeToLocate(enabled *bool, sensitivity *string) (bool, 
 	}
 	if sensitivity != nil {
 		s := strings.ToLower(strings.TrimSpace(*sensitivity))
-		switch s {
-		case "0", "disabled", "off":
-			d.cfg.ShakeSensitivity = "0"
-			d.cfg.ShakeToLocateEnabled = false
-		case "1", "lowest", "very_low", "minimal":
-			d.cfg.ShakeSensitivity = "1"
-			d.cfg.ShakeToLocateEnabled = true
-		case "2":
-			d.cfg.ShakeSensitivity = "2"
-			d.cfg.ShakeToLocateEnabled = true
-		case "3", "low":
-			d.cfg.ShakeSensitivity = "3"
-			d.cfg.ShakeToLocateEnabled = true
-		case "4", "medium", "standard", "normal":
-			d.cfg.ShakeSensitivity = "4"
-			d.cfg.ShakeToLocateEnabled = true
-		case "5":
-			d.cfg.ShakeSensitivity = "5"
-			d.cfg.ShakeToLocateEnabled = true
-		case "6", "high":
-			d.cfg.ShakeSensitivity = "6"
-			d.cfg.ShakeToLocateEnabled = true
-		case "7":
-			d.cfg.ShakeSensitivity = "7"
-			d.cfg.ShakeToLocateEnabled = true
-		case "8", "highest", "ultra_high", "very_high":
-			d.cfg.ShakeSensitivity = "8"
-			d.cfg.ShakeToLocateEnabled = true
-		default:
-			d.pausedMu.Unlock()
-			return d.cfg.ShakeToLocateEnabled, d.cfg.ShakeSensitivity, fmt.Errorf("invalid shake_sensitivity: %q (must be 0-8 or recognized preset)", s)
+		if num, err := strconv.ParseFloat(s, 64); err == nil {
+			if num < 0 {
+				num = 0
+			} else if num > 8 {
+				num = 8
+			}
+			if num < 0.15 {
+				d.cfg.ShakeSensitivity = "0"
+				d.cfg.ShakeToLocateEnabled = false
+			} else {
+				formatted := fmt.Sprintf("%.2f", num)
+				formatted = strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
+				d.cfg.ShakeSensitivity = formatted
+				d.cfg.ShakeToLocateEnabled = true
+			}
+		} else {
+			switch s {
+			case "0", "disabled", "off":
+				d.cfg.ShakeSensitivity = "0"
+				d.cfg.ShakeToLocateEnabled = false
+			case "1", "lowest", "very_low", "minimal":
+				d.cfg.ShakeSensitivity = "1"
+				d.cfg.ShakeToLocateEnabled = true
+			case "2":
+				d.cfg.ShakeSensitivity = "2"
+				d.cfg.ShakeToLocateEnabled = true
+			case "3", "low":
+				d.cfg.ShakeSensitivity = "3"
+				d.cfg.ShakeToLocateEnabled = true
+			case "4", "medium", "standard", "normal":
+				d.cfg.ShakeSensitivity = "4"
+				d.cfg.ShakeToLocateEnabled = true
+			case "5":
+				d.cfg.ShakeSensitivity = "5"
+				d.cfg.ShakeToLocateEnabled = true
+			case "6", "high":
+				d.cfg.ShakeSensitivity = "6"
+				d.cfg.ShakeToLocateEnabled = true
+			case "7":
+				d.cfg.ShakeSensitivity = "7"
+				d.cfg.ShakeToLocateEnabled = true
+			case "8", "highest", "ultra_high", "very_high":
+				d.cfg.ShakeSensitivity = "8"
+				d.cfg.ShakeToLocateEnabled = true
+			default:
+				d.pausedMu.Unlock()
+				return d.cfg.ShakeToLocateEnabled, d.cfg.ShakeSensitivity, fmt.Errorf("invalid shake_sensitivity: %q (must be 0-8 or recognized preset)", s)
+			}
 		}
 	}
 	curEnabled := d.cfg.ShakeToLocateEnabled
