@@ -69,7 +69,7 @@ func Default() *Config {
 		MouseSpeed:                   1.5,
 		ScrollSpeed:                  2.0,
 		ShakeToLocateEnabled:         true,
-		ShakeSensitivity:             "medium",
+		ShakeSensitivity:             "4",
 		Hotkeys: Hotkeys{
 			SwitchNext:    "ctrl+alt+right",
 			SwitchPrev:    "ctrl+alt+left",
