@@ -274,34 +274,53 @@ func (s *Server) handleShortcutsPut(c *gin.Context) {
 
 func (s *Server) handlePointerGet(c *gin.Context) {
 	mouseSpeed, scrollSpeed := s.d.PointerSpeeds()
+	shakeEnabled, shakeSens := s.d.ShakeToLocateConfig()
 	c.JSON(http.StatusOK, gin.H{
-		"mouse_speed":  mouseSpeed,
-		"scroll_speed": scrollSpeed,
+		"mouse_speed":             mouseSpeed,
+		"scroll_speed":            scrollSpeed,
+		"shake_to_locate_enabled": shakeEnabled,
+		"shake_sensitivity":       shakeSens,
 	})
 }
 
 func (s *Server) handlePointerPut(c *gin.Context) {
 	var req struct {
-		MouseSpeed  *float64 `json:"mouse_speed"`
-		ScrollSpeed *float64 `json:"scroll_speed"`
+		MouseSpeed           *float64 `json:"mouse_speed"`
+		ScrollSpeed          *float64 `json:"scroll_speed"`
+		ShakeToLocateEnabled *bool    `json:"shake_to_locate_enabled"`
+		ShakeSensitivity     *string  `json:"shake_sensitivity"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "invalid JSON body"))
 		return
 	}
-	if req.MouseSpeed == nil && req.ScrollSpeed == nil {
-		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "mouse_speed or scroll_speed is required"))
+	if req.MouseSpeed == nil && req.ScrollSpeed == nil && req.ShakeToLocateEnabled == nil && req.ShakeSensitivity == nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "mouse_speed, scroll_speed, shake_to_locate_enabled, or shake_sensitivity is required"))
 		return
 	}
-	mouseSpeed, scrollSpeed, err := s.d.UpdatePointerSpeeds(req.MouseSpeed, req.ScrollSpeed)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
-		return
+	mouseSpeed, scrollSpeed := s.d.PointerSpeeds()
+	var err error
+	if req.MouseSpeed != nil || req.ScrollSpeed != nil {
+		mouseSpeed, scrollSpeed, err = s.d.UpdatePointerSpeeds(req.MouseSpeed, req.ScrollSpeed)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
+			return
+		}
+	}
+	shakeEnabled, shakeSens := s.d.ShakeToLocateConfig()
+	if req.ShakeToLocateEnabled != nil || req.ShakeSensitivity != nil {
+		shakeEnabled, shakeSens, err = s.d.UpdateShakeToLocate(req.ShakeToLocateEnabled, req.ShakeSensitivity)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, apiErr("invalid_request", err.Error()))
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"ok":           true,
-		"mouse_speed":  mouseSpeed,
-		"scroll_speed": scrollSpeed,
+		"ok":                      true,
+		"mouse_speed":             mouseSpeed,
+		"scroll_speed":            scrollSpeed,
+		"shake_to_locate_enabled": shakeEnabled,
+		"shake_sensitivity":       shakeSens,
 	})
 }
 

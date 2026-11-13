@@ -28,6 +28,8 @@ type Config struct {
 	JSONBodyLimitBytes    int64       `json:"json_body_limit_bytes"`
 	MouseSpeed            float64     `json:"mouse_speed"`
 	ScrollSpeed           float64     `json:"scroll_speed"`
+	ShakeToLocateEnabled  bool        `json:"shake_to_locate_enabled"`
+	ShakeSensitivity      string      `json:"shake_sensitivity"`
 	Hotkeys               Hotkeys     `json:"hotkeys"`
 	EdgeTargets           EdgeTargets `json:"edge_targets"`
 
@@ -66,6 +68,8 @@ func Default() *Config {
 		JSONBodyLimitBytes:           65536,
 		MouseSpeed:                   1.5,
 		ScrollSpeed:                  2.0,
+		ShakeToLocateEnabled:         true,
+		ShakeSensitivity:             "medium",
 		Hotkeys: Hotkeys{
 			SwitchNext:    "ctrl+alt+right",
 			SwitchPrev:    "ctrl+alt+left",

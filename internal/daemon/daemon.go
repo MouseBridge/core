@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -630,6 +631,53 @@ func (d *Daemon) UpdatePointerSpeeds(mouseSpeed, scrollSpeed *float64) (float64,
 	return nextMouse, nextScroll, nil
 }
 
+// ShakeToLocateConfig returns the configured shake to locate enabled state and sensitivity.
+func (d *Daemon) ShakeToLocateConfig() (bool, string) {
+	d.pausedMu.RLock()
+	defer d.pausedMu.RUnlock()
+	sens := d.cfg.ShakeSensitivity
+	if sens == "" {
+		sens = "medium"
+	}
+	return d.cfg.ShakeToLocateEnabled, sens
+}
+
+// UpdateShakeToLocate updates shake to locate enabled state and/or sensitivity.
+func (d *Daemon) UpdateShakeToLocate(enabled *bool, sensitivity *string) (bool, string, error) {
+	d.pausedMu.Lock()
+	if enabled != nil {
+		d.cfg.ShakeToLocateEnabled = *enabled
+	}
+	if sensitivity != nil {
+		s := strings.ToLower(strings.TrimSpace(*sensitivity))
+		switch s {
+		case "low", "medium", "high", "disabled":
+			d.cfg.ShakeSensitivity = s
+		default:
+			d.pausedMu.Unlock()
+			return d.cfg.ShakeToLocateEnabled, d.cfg.ShakeSensitivity, fmt.Errorf("invalid shake_sensitivity: %q (must be low, medium, high, or disabled)", s)
+		}
+	}
+	curEnabled := d.cfg.ShakeToLocateEnabled
+	curSens := d.cfg.ShakeSensitivity
+	if curSens == "" {
+		curSens = "medium"
+	}
+	if d.configPath != "" {
+		_ = d.cfg.Save(d.configPath)
+	}
+	d.pausedMu.Unlock()
+
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+	d.broadcast(BusEvent{
+		Kind: "log",
+		Msg:  fmt.Sprintf("shake to locate updated enabled=%v sensitivity=%s", curEnabled, curSens),
+	})
+	return curEnabled, curSens, nil
+}
+
 // Identity returns the device identity.
 func (d *Daemon) Identity() device.Identity { return d.identity }
 
@@ -775,6 +823,7 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 	}
 	d.sessMu.RUnlock()
 	mouseSpeed, scrollSpeed := d.PointerSpeeds()
+	shakeEnabled, shakeSens := d.ShakeToLocateConfig()
 
 	return helper.ConfigPushPayload{
 		Daemon: helper.DaemonInfo{
@@ -796,11 +845,13 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 			"top":    d.cfg.EdgeTargets.Top,
 			"bottom": d.cfg.EdgeTargets.Bottom,
 		},
-		ActiveTarget:   d.ctrl.ActiveTarget(),
-		Paused:         d.Paused(),
-		CaptureEnabled: d.CaptureEnabled(),
-		MouseSpeed:     mouseSpeed,
-		ScrollSpeed:    scrollSpeed,
+		ActiveTarget:             d.ctrl.ActiveTarget(),
+		Paused:                   d.Paused(),
+		CaptureEnabled:           d.CaptureEnabled(),
+		MouseSpeed:               mouseSpeed,
+		ScrollSpeed:              scrollSpeed,
+		ShakeToLocateEnabled:     shakeEnabled,
+		ShakeToLocateSensitivity: shakeSens,
 	}
 }
 

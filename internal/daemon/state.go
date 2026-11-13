@@ -55,6 +55,8 @@ type StatusSnapshot struct {
 	FileDownloadDir              string               `json:"file_download_dir"`
 	MouseSpeed                   float64              `json:"mouse_speed"`
 	ScrollSpeed                  float64              `json:"scroll_speed"`
+	ShakeToLocateEnabled         bool                 `json:"shake_to_locate_enabled"`
+	ShakeSensitivity             string               `json:"shake_sensitivity"`
 }
 
 // State returns the public status view safe to expose over LAN HTTP.
@@ -120,6 +122,7 @@ func (d *Daemon) stateSnapshot(includeDisplayPIN bool) StatusSnapshot {
 	paused := d.Paused()
 	captureEnabled := d.CaptureEnabled()
 	mouseSpeed, scrollSpeed := d.PointerSpeeds()
+	shakeEnabled, shakeSens := d.ShakeToLocateConfig()
 
 	return StatusSnapshot{
 		Daemon: DaemonInfo{
@@ -144,5 +147,7 @@ func (d *Daemon) stateSnapshot(includeDisplayPIN bool) StatusSnapshot {
 		FileDownloadDir:              d.FileDownloadDir(),
 		MouseSpeed:                   mouseSpeed,
 		ScrollSpeed:                  scrollSpeed,
+		ShakeToLocateEnabled:         shakeEnabled,
+		ShakeSensitivity:             shakeSens,
 	}
 }
