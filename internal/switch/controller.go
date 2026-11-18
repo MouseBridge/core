@@ -68,7 +68,27 @@ func (c *Controller) SwitchBack() {
 func (c *Controller) TryEdgeSwitch(deviceID, edge string, entryPct float64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.edgeReadyLocked(deviceID) {
+		return false
+	}
+	prev := c.activeTarget
+	c.activeTarget = deviceID
+	cb := c.OnSwitch
+	if cb != nil {
+		go cb(SwitchEvent{PreviousTargetID: prev, TargetID: deviceID, Trigger: "edge", Edge: edge, EntryPct: entryPct})
+	}
+	return true
+}
 
+// EdgeReady tracks dwell without changing the active target. Callers that need
+// remote approval can wait for a grant before committing the target.
+func (c *Controller) EdgeReady(deviceID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.edgeReadyLocked(deviceID)
+}
+
+func (c *Controller) edgeReadyLocked(deviceID string) bool {
 	now := time.Now()
 	if c.edgePending != deviceID {
 		c.edgePending = deviceID
@@ -79,11 +99,5 @@ func (c *Controller) TryEdgeSwitch(deviceID, edge string, entryPct float64) bool
 		return false
 	}
 	c.edgePending = ""
-	prev := c.activeTarget
-	c.activeTarget = deviceID
-	cb := c.OnSwitch
-	if cb != nil {
-		go cb(SwitchEvent{PreviousTargetID: prev, TargetID: deviceID, Trigger: "edge", Edge: edge, EntryPct: entryPct})
-	}
 	return true
 }

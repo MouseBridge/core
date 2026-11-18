@@ -157,10 +157,26 @@ type ScrollPayload struct {
 
 // SwitchRequestPayload requests control handoff.
 type SwitchRequestPayload struct {
+	RequestID string  `json:"request_id,omitempty"`
 	Trigger   string  `json:"trigger"`
 	Edge      string  `json:"edge,omitempty"`
 	EntryPct  float64 `json:"entry_pct,omitempty"`
 	Direction string  `json:"direction,omitempty"`
+}
+
+// SwitchAckPayload reports whether the receiver reserved control for a request.
+// A grant is valid only when RequestID matches the sender's pending request.
+type SwitchAckPayload struct {
+	RequestID string `json:"request_id,omitempty"`
+	Granted   bool   `json:"granted"`
+	Released  bool   `json:"released,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// SwitchBackPayload releases a previously granted peer-control lease.
+type SwitchBackPayload struct {
+	RequestID string `json:"request_id,omitempty"`
+	LeaseID   string `json:"lease_id,omitempty"`
 }
 
 // ClipboardSyncPayload carries text clipboard content across a P2P session.
