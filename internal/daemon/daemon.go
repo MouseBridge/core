@@ -53,6 +53,9 @@ type Daemon struct {
 	localLab        *locallab.Runner
 	localValidation *localvalidate.Runner
 	ctrl            *switch_.Controller
+	controlMu       sync.RWMutex
+	remotePeer      string
+	remoteEntryEdge string
 
 	pausedMu       sync.RWMutex
 	paused         bool
@@ -366,8 +369,14 @@ func (d *Daemon) SessionAdd(connectionID, deviceID, name, ip, role string) {
 
 func (d *Daemon) SessionRemove(connectionID string) {
 	d.sessMu.Lock()
+	entry := d.sessions[connectionID]
 	delete(d.sessions, connectionID)
 	d.sessMu.Unlock()
+	if entry != nil && d.ctrl.ActiveTarget() == entry.DeviceID {
+		d.ctrl.SwitchBack()
+		d.clearRemoteControl(entry.DeviceID)
+		d.releaseRemoteKeys(entry.DeviceID)
+	}
 	d.helper.BroadcastConfig()
 }
 
@@ -919,7 +928,7 @@ func (d *Daemon) handleHelperHotkey(ev helper.HotkeyPayload) {
 	case "switch_prev":
 		d.switchRelative(-1)
 	case "switch_to_host":
-		d.ctrl.SwitchBack()
+		d.SwitchToHost()
 	case "disconnect_all":
 		d.disconnectAll()
 	case "toggle_pause":
@@ -932,16 +941,36 @@ func (d *Daemon) handleHelperHotkey(ev helper.HotkeyPayload) {
 }
 
 func (d *Daemon) handleHelperEdge(ev helper.EdgePayload) {
-	if d.Paused() || d.ctrl.ActiveTarget() != d.identity.DeviceID {
+	if d.Paused() {
+		return
+	}
+	activeTarget := d.ctrl.ActiveTarget()
+	if activeTarget != d.identity.DeviceID {
+		d.handleRemoteReturnEdge(activeTarget, ev)
 		return
 	}
 
 	target := d.edgeTargetFor(ev.Edge)
+	if target == "" && ev.Edge == "right" {
+		// The first usable setup is a single remote: right enters it automatically.
+		targets := d.switchTargets()
+		if len(targets) == 2 {
+			target = targets[1]
+		}
+	}
 	if target == "" || !d.hasSessionDevice(target) {
 		return
 	}
 
 	if d.ctrl.TryEdgeSwitch(target, ev.Edge, ev.Pct) {
+		if err := d.sendSwitchRequest(target, "edge", ev.Edge, ev.Pct); err != nil {
+			d.ctrl.SwitchBack()
+			d.broadcast(BusEvent{Kind: "error", Msg: "edge switch request: " + err.Error()})
+			if d.helper != nil {
+				d.helper.BroadcastConfig()
+			}
+			return
+		}
 		d.broadcast(BusEvent{
 			Kind: "log",
 			Msg:  fmt.Sprintf("helper edge switch edge=%s target=%s pct=%.3f", ev.Edge, target, ev.Pct),
@@ -1156,10 +1185,7 @@ func (d *Daemon) CaptureEnabled() bool {
 }
 
 func (d *Daemon) SwitchToHost() {
-	d.ctrl.SwitchBack()
-	if d.helper != nil {
-		d.helper.BroadcastConfig()
-	}
+	d.switchToHost()
 }
 
 func (d *Daemon) SwitchNext() {
@@ -1357,7 +1383,7 @@ func (d *Daemon) scheduleReconnectWithDelay(deviceID string, initialDelay time.D
 func (d *Daemon) switchRelative(step int) {
 	targets := d.switchTargets()
 	if len(targets) == 0 {
-		d.ctrl.SwitchBack()
+		d.switchToHost()
 		return
 	}
 
@@ -1367,7 +1393,22 @@ func (d *Daemon) switchRelative(step int) {
 		idx = 0
 	}
 	next := (idx + step + len(targets)) % len(targets)
-	d.ctrl.SwitchTo(targets[next])
+	nextTarget := targets[next]
+	if nextTarget == current {
+		return
+	}
+	if current != "" && current != d.identity.DeviceID {
+		if err := d.sendSwitchBack(current); err != nil {
+			d.broadcast(BusEvent{Kind: "error", Msg: "switch back: " + err.Error()})
+		}
+	}
+	d.ctrl.SwitchTo(nextTarget)
+	if nextTarget != d.identity.DeviceID {
+		if err := d.sendSwitchRequest(nextTarget, "hotkey", "", 0); err != nil {
+			d.ctrl.SwitchBack()
+			d.broadcast(BusEvent{Kind: "error", Msg: "switch request: " + err.Error()})
+		}
+	}
 }
 
 func (d *Daemon) switchTargets() []string {
@@ -1399,6 +1440,128 @@ func (d *Daemon) edgeTargetFor(edge string) string {
 		return d.cfg.EdgeTargets.Bottom
 	default:
 		return ""
+	}
+}
+
+func (d *Daemon) handleRemoteReturnEdge(activeTarget string, ev helper.EdgePayload) {
+	d.controlMu.RLock()
+	peer := d.remotePeer
+	entryEdge := d.remoteEntryEdge
+	d.controlMu.RUnlock()
+	if peer == "" || peer != activeTarget {
+		return
+	}
+	returnEdge := oppositeEdge(entryEdge)
+	if returnEdge == "" {
+		returnEdge = "left"
+	}
+	if ev.Edge != returnEdge {
+		return
+	}
+	if !d.ctrl.TryEdgeSwitch(d.identity.DeviceID, ev.Edge, ev.Pct) {
+		return
+	}
+	d.clearRemoteControl(peer)
+	if err := d.sendSwitchBack(peer); err != nil {
+		d.broadcast(BusEvent{Kind: "error", Msg: "edge switch back: " + err.Error()})
+	}
+	d.broadcast(BusEvent{
+		Kind: "log",
+		Msg:  fmt.Sprintf("helper edge switch back edge=%s target=%s pct=%.3f", ev.Edge, peer, ev.Pct),
+	})
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+}
+
+func oppositeEdge(edge string) string {
+	switch edge {
+	case "left":
+		return "right"
+	case "right":
+		return "left"
+	case "top":
+		return "bottom"
+	case "bottom":
+		return "top"
+	default:
+		return ""
+	}
+}
+
+func (d *Daemon) switchToHost() {
+	previous := d.ctrl.ActiveTarget()
+	d.ctrl.SwitchBack()
+	if previous != "" && previous != d.identity.DeviceID {
+		if err := d.sendSwitchBack(previous); err != nil {
+			d.broadcast(BusEvent{Kind: "error", Msg: "switch back: " + err.Error()})
+		}
+		d.clearRemoteControl(previous)
+	}
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+}
+
+func (d *Daemon) clearRemoteControl(peer string) {
+	d.controlMu.Lock()
+	if peer == "" || d.remotePeer == peer {
+		d.remotePeer = ""
+		d.remoteEntryEdge = ""
+	}
+	d.controlMu.Unlock()
+}
+
+func (d *Daemon) sendSwitchRequest(deviceID, trigger, edge string, entryPct float64) error {
+	payload := event.SwitchRequestPayload{Trigger: trigger, Edge: edge, EntryPct: entryPct}
+	return d.sendPeerSwitchMessage(deviceID, event.TypeSwitchRequest, payload)
+}
+
+func (d *Daemon) sendSwitchBack(deviceID string) error {
+	return d.sendPeerSwitchMessage(deviceID, event.TypeSwitchBack, struct{}{})
+}
+
+func (d *Daemon) sendPeerSwitchMessage(deviceID, messageType string, payload interface{}) error {
+	d.connsMu.Lock()
+	var target *transport.Conn
+	for conn, id := range d.conns {
+		if id == deviceID {
+			target = conn
+			break
+		}
+	}
+	d.connsMu.Unlock()
+	if target == nil {
+		return fmt.Errorf("no active session for device %q", deviceID)
+	}
+	now := time.Now().UnixMilli()
+	return target.Send(event.Message{V: 1, Seq: now, Type: messageType, Ts: now, Payload: payload})
+}
+
+// HandleRemoteSwitchRequest applies a control handoff initiated by a connected peer.
+func (d *Daemon) HandleRemoteSwitchRequest(deviceID string, pay event.SwitchRequestPayload) {
+	if !d.hasSessionDevice(deviceID) {
+		return
+	}
+	d.controlMu.Lock()
+	d.remotePeer = deviceID
+	d.remoteEntryEdge = pay.Edge
+	d.controlMu.Unlock()
+	d.ctrl.SwitchTo(deviceID)
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+}
+
+// HandleRemoteSwitchBack returns control to this device when its active peer exits.
+func (d *Daemon) HandleRemoteSwitchBack(deviceID string) {
+	if d.ctrl.ActiveTarget() != deviceID {
+		return
+	}
+	d.ctrl.SwitchBack()
+	d.clearRemoteControl(deviceID)
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
 	}
 }
 

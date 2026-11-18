@@ -43,6 +43,12 @@ type FileTransferSessionHost interface {
 	HandleFileEnd(deviceID string, pay event.FileEndPayload)
 }
 
+// SwitchSessionHost coordinates control changes across both sides of a session.
+type SwitchSessionHost interface {
+	HandleRemoteSwitchRequest(deviceID string, pay event.SwitchRequestPayload)
+	HandleRemoteSwitchBack(deviceID string)
+}
+
 // RunSession runs the message loop for an authenticated session.
 // role is "server" or "client".
 func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, emit func(BusEvent)) {
@@ -191,8 +197,19 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 		case event.TypeSwitchRequest:
 			var pay event.SwitchRequestPayload
 			_ = event.DecodePayload(msg, &pay)
+			if sh, ok := h.(SwitchSessionHost); ok {
+				sh.HandleRemoteSwitchRequest(deviceID, pay)
+			}
 			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_request trigger=%s edge=%s latency=%.1fms",
 				pay.Trigger, pay.Edge, latency)})
+			_ = c.Send(event.Message{V: 1, Seq: seq, Type: event.TypeSwitchAck, Ts: time.Now().UnixMilli(), Payload: struct{}{}})
+			seq++
+
+		case event.TypeSwitchBack:
+			if sh, ok := h.(SwitchSessionHost); ok {
+				sh.HandleRemoteSwitchBack(deviceID)
+			}
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_back from %s latency=%.1fms", name, latency)})
 			_ = c.Send(event.Message{V: 1, Seq: seq, Type: event.TypeSwitchAck, Ts: time.Now().UnixMilli(), Payload: struct{}{}})
 			seq++
 
