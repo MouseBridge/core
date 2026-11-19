@@ -45,8 +45,28 @@ type FileTransferSessionHost interface {
 
 // SwitchSessionHost coordinates control changes across both sides of a session.
 type SwitchSessionHost interface {
-	HandleRemoteSwitchRequest(deviceID string, pay event.SwitchRequestPayload)
-	HandleRemoteSwitchBack(deviceID string)
+	HandleRemoteSwitchRequest(deviceID string, pay event.SwitchRequestPayload) event.SwitchAckPayload
+	HandleRemoteSwitchBack(deviceID string, pay event.SwitchBackPayload) event.SwitchAckPayload
+}
+
+// SwitchAckSessionHost receives correlated grant/reject responses.
+type SwitchAckSessionHost interface {
+	HandleRemoteSwitchAck(deviceID string, pay event.SwitchAckPayload)
+}
+
+// SwitchGrantSessionHost activates input routing after the grant ACK is written.
+type SwitchGrantSessionHost interface {
+	ConfirmRemoteSwitchGrant(deviceID, requestID string)
+}
+
+// InputAuthorizationHost gates data-plane input on an active switch grant.
+type InputAuthorizationHost interface {
+	CanReceiveInput(deviceID string) bool
+}
+
+func canReceiveInput(h SessionHost, deviceID string) bool {
+	auth, ok := h.(InputAuthorizationHost)
+	return !ok || auth.CanReceiveInput(deviceID)
 }
 
 // RunSession runs the message loop for an authenticated session.
@@ -100,6 +120,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 
 		switch msg.Type {
 		case event.TypeMouseMove:
+			if !canReceiveInput(h, deviceID) {
+				continue
+			}
 			var pay event.MouseMovePayload
 			_ = event.DecodePayload(msg, &pay)
 			h.PushHelperInput(helper.InputPayload{
@@ -111,6 +134,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv mouse_move dx=%.1f dy=%.1f button=%s latency=%.1fms", pay.DX, pay.DY, pay.Button, latency))
 
 		case event.TypeMouseMoveAbs:
+			if !canReceiveInput(h, deviceID) {
+				continue
+			}
 			var pay event.MouseMoveAbsPayload
 			_ = event.DecodePayload(msg, &pay)
 			h.PushHelperInput(helper.InputPayload{
@@ -122,6 +148,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv mouse_move_abs x=%.1f y=%.1f button=%s latency=%.1fms", pay.X, pay.Y, pay.Button, latency))
 
 		case event.TypeMouseButton:
+			if !canReceiveInput(h, deviceID) {
+				continue
+			}
 			var pay event.MouseButtonPayload
 			_ = event.DecodePayload(msg, &pay)
 			h.PushHelperInput(helper.InputPayload{
@@ -133,6 +162,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv mouse_button button=%s pressed=%t latency=%.1fms", pay.Button, pay.Pressed, latency))
 
 		case event.TypeKeyDown:
+			if !canReceiveInput(h, deviceID) {
+				continue
+			}
 			var pay event.KeyDownPayload
 			_ = event.DecodePayload(msg, &pay)
 			h.PushHelperInput(helper.InputPayload{
@@ -143,6 +175,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv key_down code=%d mods=%d latency=%.1fms", pay.Code, pay.Mods, latency))
 
 		case event.TypeKeyUp:
+			if !canReceiveInput(h, deviceID) {
+				continue
+			}
 			var pay event.KeyUpPayload
 			_ = event.DecodePayload(msg, &pay)
 			h.PushHelperInput(helper.InputPayload{
@@ -153,6 +188,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv key_up code=%d mods=%d latency=%.1fms", pay.Code, pay.Mods, latency))
 
 		case event.TypeText:
+			if !canReceiveInput(h, deviceID) {
+				continue
+			}
 			var pay event.TextPayload
 			_ = event.DecodePayload(msg, &pay)
 			h.PushHelperInput(helper.InputPayload{
@@ -162,6 +200,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv text len=%d latency=%.1fms", len(pay.Text), latency))
 
 		case event.TypeScroll:
+			if !canReceiveInput(h, deviceID) {
+				continue
+			}
 			var pay event.ScrollPayload
 			_ = event.DecodePayload(msg, &pay)
 			h.PushHelperInput(helper.InputPayload{
@@ -172,6 +213,9 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 			emitVerboseSessionLog(emit, fmt.Sprintf("recv scroll dx=%.1f dy=%.1f latency=%.1fms", pay.DX, pay.DY, latency))
 
 		case event.TypeLocateCursor:
+			if !canReceiveInput(h, deviceID) {
+				continue
+			}
 			h.PushHelperInput(helper.InputPayload{
 				Kind: "locate_cursor",
 			})
@@ -197,24 +241,42 @@ func RunSession(c *transport.Conn, deviceID, name, role string, h SessionHost, e
 		case event.TypeSwitchRequest:
 			var pay event.SwitchRequestPayload
 			_ = event.DecodePayload(msg, &pay)
+			ack := event.SwitchAckPayload{RequestID: pay.RequestID, Granted: false, Reason: "switch_handler_unavailable"}
 			if sh, ok := h.(SwitchSessionHost); ok {
-				sh.HandleRemoteSwitchRequest(deviceID, pay)
+				ack = sh.HandleRemoteSwitchRequest(deviceID, pay)
 			}
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_request trigger=%s edge=%s latency=%.1fms",
-				pay.Trigger, pay.Edge, latency)})
-			_ = c.Send(event.Message{V: 1, Seq: seq, Type: event.TypeSwitchAck, Ts: time.Now().UnixMilli(), Payload: struct{}{}})
+			status := "rejected"
+			if ack.Granted {
+				status = "granted"
+			}
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_request %s trigger=%s edge=%s latency=%.1fms",
+				status, pay.Trigger, pay.Edge, latency)})
+			if err := c.Send(event.Message{V: 1, Seq: seq, Type: event.TypeSwitchAck, Ts: time.Now().UnixMilli(), Payload: ack}); err == nil && ack.Granted {
+				if gh, ok := h.(SwitchGrantSessionHost); ok {
+					gh.ConfirmRemoteSwitchGrant(deviceID, ack.RequestID)
+				}
+			}
 			seq++
 
 		case event.TypeSwitchBack:
+			var pay event.SwitchBackPayload
+			_ = event.DecodePayload(msg, &pay)
+			ack := event.SwitchAckPayload{RequestID: pay.RequestID, Reason: "switch_handler_unavailable"}
 			if sh, ok := h.(SwitchSessionHost); ok {
-				sh.HandleRemoteSwitchBack(deviceID)
+				ack = sh.HandleRemoteSwitchBack(deviceID, pay)
 			}
 			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_back from %s latency=%.1fms", name, latency)})
-			_ = c.Send(event.Message{V: 1, Seq: seq, Type: event.TypeSwitchAck, Ts: time.Now().UnixMilli(), Payload: struct{}{}})
+			_ = c.Send(event.Message{V: 1, Seq: seq, Type: event.TypeSwitchAck, Ts: time.Now().UnixMilli(), Payload: ack})
 			seq++
 
 		case event.TypeSwitchAck:
-			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_ack from %s latency=%.1fms", name, latency)})
+			var pay event.SwitchAckPayload
+			if event.DecodePayload(msg, &pay) == nil && pay.RequestID != "" {
+				if sh, ok := h.(SwitchAckSessionHost); ok {
+					sh.HandleRemoteSwitchAck(deviceID, pay)
+				}
+			}
+			emit(BusEvent{Kind: "log", Msg: fmt.Sprintf("switch_ack from %s granted=%t latency=%.1fms", name, pay.Granted, latency)})
 
 		case event.TypeClipboardSync:
 			var pay event.ClipboardSyncPayload

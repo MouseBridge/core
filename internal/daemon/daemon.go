@@ -45,17 +45,29 @@ type Daemon struct {
 	cfg        *config.Config
 	identity   device.Identity
 
-	rem             *remembered.Store
-	pending         *pending.Manager
-	tracker         *p2p.OutboundTracker
-	helper          *helper.Manager
-	localHelper     *localhelper.Runtime
-	localLab        *locallab.Runner
-	localValidation *localvalidate.Runner
-	ctrl            *switch_.Controller
-	controlMu       sync.RWMutex
-	remotePeer      string
-	remoteEntryEdge string
+	rem                    *remembered.Store
+	pending                *pending.Manager
+	tracker                *p2p.OutboundTracker
+	helper                 *helper.Manager
+	localHelper            *localhelper.Runtime
+	localLab               *locallab.Runner
+	localValidation        *localvalidate.Runner
+	ctrl                   *switch_.Controller
+	transitionMu           sync.Mutex
+	controlMu              sync.RWMutex
+	remotePeer             string
+	remoteEntryEdge        string
+	remoteRequestID        string
+	remoteLeasePhase       remoteLeasePhase
+	remoteGrantPending     chan struct{}
+	remoteReturnPending    bool
+	activeLeasePeer        string
+	activeLeaseID          string
+	edgeSuppressedUntil    time.Time
+	localTransitionPending bool
+	pendingSwitchMu        sync.Mutex
+	pendingSwitches        map[string]*pendingSwitchRequest
+	switchRequestCount     uint64
 
 	pausedMu       sync.RWMutex
 	paused         bool
@@ -96,6 +108,20 @@ type Daemon struct {
 	lnMu sync.Mutex
 
 	cancel context.CancelFunc
+}
+
+type remoteLeasePhase uint8
+
+const (
+	remoteLeaseNone remoteLeasePhase = iota
+	remoteLeaseGrantPending
+	remoteLeaseActive
+)
+
+type pendingSwitchRequest struct {
+	deviceID string
+	ack      chan event.SwitchAckPayload
+	canceled bool
 }
 
 type sessionEntry struct {
@@ -155,6 +181,7 @@ func New(opts Options) (*Daemon, error) {
 		pendingConns:      make(map[string]*transport.Conn),
 		subs:              make(map[chan BusEvent]struct{}),
 		reconnectTimers:   make(map[string]*time.Timer),
+		pendingSwitches:   make(map[string]*pendingSwitchRequest),
 		reconnectAttempts: make(map[string]int),
 		manualDisconnect:  make(map[string]bool),
 		httpConnCh:        make(chan net.Conn, 64),
@@ -372,10 +399,23 @@ func (d *Daemon) SessionRemove(connectionID string) {
 	entry := d.sessions[connectionID]
 	delete(d.sessions, connectionID)
 	d.sessMu.Unlock()
-	if entry != nil && d.ctrl.ActiveTarget() == entry.DeviceID {
-		d.ctrl.SwitchBack()
+	if entry != nil {
+		d.cancelPendingSwitchRequests(entry.DeviceID)
+	}
+	d.transitionMu.Lock()
+	defer d.transitionMu.Unlock()
+	if entry != nil {
+		activeTarget := d.ctrl.ActiveTarget()
+		activeLeasePeer := d.activeLeasePeerSnapshot()
+		if d.ctrl.ActiveTarget() == entry.DeviceID {
+			d.ctrl.SwitchBack()
+			d.releaseRemoteKeys(entry.DeviceID)
+		}
 		d.clearRemoteControl(entry.DeviceID)
-		d.releaseRemoteKeys(entry.DeviceID)
+		if activeTarget == entry.DeviceID || activeLeasePeer == entry.DeviceID {
+			d.clearActiveLease(entry.DeviceID, d.activeLeaseIDSnapshot())
+		}
+		d.suppressEdgesFor(controlTransitionCooldown)
 	}
 	d.helper.BroadcastConfig()
 }
@@ -890,6 +930,10 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 	d.sessMu.RUnlock()
 	mouseSpeed, scrollSpeed := d.PointerSpeeds()
 	shakeEnabled, shakeSens := d.ShakeToLocateConfig()
+	activeTarget := d.ctrl.ActiveTarget()
+	d.controlMu.RLock()
+	controlledByRemote := d.remotePeer != ""
+	d.controlMu.RUnlock()
 
 	return helper.ConfigPushPayload{
 		Daemon: helper.DaemonInfo{
@@ -911,7 +955,8 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 			"top":    d.cfg.EdgeTargets.Top,
 			"bottom": d.cfg.EdgeTargets.Bottom,
 		},
-		ActiveTarget:             d.ctrl.ActiveTarget(),
+		ActiveTarget:             activeTarget,
+		ControlledByRemote:       controlledByRemote,
 		Paused:                   d.Paused(),
 		CaptureEnabled:           d.CaptureEnabled(),
 		MouseSpeed:               mouseSpeed,
@@ -941,12 +986,20 @@ func (d *Daemon) handleHelperHotkey(ev helper.HotkeyPayload) {
 }
 
 func (d *Daemon) handleHelperEdge(ev helper.EdgePayload) {
-	if d.Paused() {
+	d.transitionMu.Lock()
+	defer d.transitionMu.Unlock()
+	if d.Paused() || d.edgeEventsSuppressed() {
+		return
+	}
+	d.controlMu.RLock()
+	remotePeer := d.remotePeer
+	d.controlMu.RUnlock()
+	if remotePeer != "" {
+		d.handleRemoteReturnEdge(remotePeer, ev)
 		return
 	}
 	activeTarget := d.ctrl.ActiveTarget()
 	if activeTarget != d.identity.DeviceID {
-		d.handleRemoteReturnEdge(activeTarget, ev)
 		return
 	}
 
@@ -962,15 +1015,27 @@ func (d *Daemon) handleHelperEdge(ev helper.EdgePayload) {
 		return
 	}
 
-	if d.ctrl.TryEdgeSwitch(target, ev.Edge, ev.Pct) {
-		if err := d.sendSwitchRequest(target, "edge", ev.Edge, ev.Pct); err != nil {
-			d.ctrl.SwitchBack()
-			d.broadcast(BusEvent{Kind: "error", Msg: "edge switch request: " + err.Error()})
-			if d.helper != nil {
-				d.helper.BroadcastConfig()
+	if d.ctrl.EdgeReady(target) {
+		if !d.beginLocalTransition() {
+			return
+		}
+		defer d.endLocalTransition()
+		granted, leaseID, err := d.requestSwitch(target, "edge", ev.Edge, ev.Pct)
+		if err != nil || !granted {
+			d.suppressEdgesFor(controlTransitionCooldown)
+			if err != nil {
+				d.broadcast(BusEvent{Kind: "error", Msg: "edge switch request: " + err.Error()})
 			}
 			return
 		}
+		if !d.hasSessionDevice(target) {
+			_ = d.sendSwitchBack(target, leaseID)
+			d.suppressEdgesFor(controlTransitionCooldown)
+			return
+		}
+		d.ctrl.SwitchTo(target)
+		d.setActiveLease(target, leaseID)
+		d.suppressEdgesFor(controlTransitionCooldown)
 		d.broadcast(BusEvent{
 			Kind: "log",
 			Msg:  fmt.Sprintf("helper edge switch edge=%s target=%s pct=%.3f", ev.Edge, target, ev.Pct),
@@ -987,7 +1052,7 @@ func (d *Daemon) handleHelperInput(input helper.InputPayload) {
 	}
 
 	target := d.ctrl.ActiveTarget()
-	if target == "" || target == d.identity.DeviceID {
+	if target == "" || target == d.identity.DeviceID || !d.hasSessionDevice(target) {
 		return
 	}
 
@@ -1381,9 +1446,11 @@ func (d *Daemon) scheduleReconnectWithDelay(deviceID string, initialDelay time.D
 }
 
 func (d *Daemon) switchRelative(step int) {
+	d.transitionMu.Lock()
+	defer d.transitionMu.Unlock()
 	targets := d.switchTargets()
 	if len(targets) == 0 {
-		d.switchToHost()
+		d.switchToHostLocked()
 		return
 	}
 
@@ -1397,18 +1464,67 @@ func (d *Daemon) switchRelative(step int) {
 	if nextTarget == current {
 		return
 	}
-	if current != "" && current != d.identity.DeviceID {
-		if err := d.sendSwitchBack(current); err != nil {
+	if !d.beginLocalTransition() {
+		return
+	}
+	defer d.endLocalTransition()
+	if !d.waitForRemoteGrantConfirmation() {
+		d.broadcast(BusEvent{Kind: "error", Msg: "switch aborted while grant acknowledgement was pending"})
+		return
+	}
+	// Stop the old route before releasing its lease or requesting a new one.
+	d.ctrl.SwitchBack()
+	d.controlMu.RLock()
+	remotePeer := d.remotePeer
+	remoteLeaseID := d.remoteRequestID
+	activeLeasePeer := d.activeLeasePeer
+	activeLeaseID := d.activeLeaseID
+	d.controlMu.RUnlock()
+	toRelease := make([]string, 0, 2)
+	seen := make(map[string]struct{}, 2)
+	for _, peer := range []string{current, activeLeasePeer, remotePeer} {
+		if peer == "" || peer == d.identity.DeviceID {
+			continue
+		}
+		if _, ok := seen[peer]; ok {
+			continue
+		}
+		seen[peer] = struct{}{}
+		toRelease = append(toRelease, peer)
+	}
+	for _, peer := range toRelease {
+		leaseID := ""
+		if peer == activeLeasePeer {
+			leaseID = activeLeaseID
+		}
+		if peer == remotePeer {
+			leaseID = remoteLeaseID
+		}
+		if err := d.releasePeerAndWait(peer, leaseID); err != nil {
 			d.broadcast(BusEvent{Kind: "error", Msg: "switch back: " + err.Error()})
+			return
 		}
+		d.clearRemoteControl(peer)
+		d.clearActiveLease(peer, leaseID)
 	}
-	d.ctrl.SwitchTo(nextTarget)
 	if nextTarget != d.identity.DeviceID {
-		if err := d.sendSwitchRequest(nextTarget, "hotkey", "", 0); err != nil {
-			d.ctrl.SwitchBack()
-			d.broadcast(BusEvent{Kind: "error", Msg: "switch request: " + err.Error()})
+		granted, leaseID, err := d.requestSwitch(nextTarget, "hotkey", "", 0)
+		if err != nil || !granted {
+			d.suppressEdgesFor(controlTransitionCooldown)
+			if err != nil {
+				d.broadcast(BusEvent{Kind: "error", Msg: "switch request: " + err.Error()})
+			}
+			return
 		}
+		if !d.hasSessionDevice(nextTarget) {
+			_ = d.sendSwitchBack(nextTarget, leaseID)
+			d.suppressEdgesFor(controlTransitionCooldown)
+			return
+		}
+		d.ctrl.SwitchTo(nextTarget)
+		d.setActiveLease(nextTarget, leaseID)
 	}
+	d.suppressEdgesFor(controlTransitionCooldown)
 }
 
 func (d *Daemon) switchTargets() []string {
@@ -1458,13 +1574,27 @@ func (d *Daemon) handleRemoteReturnEdge(activeTarget string, ev helper.EdgePaylo
 	if ev.Edge != returnEdge {
 		return
 	}
+	d.controlMu.Lock()
+	if d.remotePeer != peer || d.remoteReturnPending {
+		d.controlMu.Unlock()
+		return
+	}
+	d.remoteReturnPending = true
+	leaseID := d.remoteRequestID
+	d.controlMu.Unlock()
 	if !d.ctrl.TryEdgeSwitch(d.identity.DeviceID, ev.Edge, ev.Pct) {
+		d.controlMu.Lock()
+		if d.remotePeer == peer {
+			d.remoteReturnPending = false
+		}
+		d.controlMu.Unlock()
 		return
 	}
 	d.clearRemoteControl(peer)
-	if err := d.sendSwitchBack(peer); err != nil {
+	if err := d.sendSwitchBack(peer, leaseID); err != nil {
 		d.broadcast(BusEvent{Kind: "error", Msg: "edge switch back: " + err.Error()})
 	}
+	d.suppressEdgesFor(controlTransitionCooldown)
 	d.broadcast(BusEvent{
 		Kind: "log",
 		Msg:  fmt.Sprintf("helper edge switch back edge=%s target=%s pct=%.3f", ev.Edge, peer, ev.Pct),
@@ -1490,35 +1620,308 @@ func oppositeEdge(edge string) string {
 }
 
 func (d *Daemon) switchToHost() {
+	d.transitionMu.Lock()
+	defer d.transitionMu.Unlock()
+	d.switchToHostLocked()
+}
+
+func (d *Daemon) switchToHostLocked() {
+	if !d.beginLocalTransition() {
+		return
+	}
+	defer d.endLocalTransition()
+	if !d.waitForRemoteGrantConfirmation() {
+		d.broadcast(BusEvent{Kind: "error", Msg: "switch to host aborted while grant acknowledgement was pending"})
+		return
+	}
 	previous := d.ctrl.ActiveTarget()
+	d.controlMu.RLock()
+	remotePeer := d.remotePeer
+	remoteLeaseID := d.remoteRequestID
+	activeLeasePeer := d.activeLeasePeer
+	activeLeaseID := d.activeLeaseID
+	d.controlMu.RUnlock()
+	// Pause outbound routing and revoke the inbound input gate before notifying
+	// peers. The lease IDs remain in the local snapshot for the release messages.
 	d.ctrl.SwitchBack()
-	if previous != "" && previous != d.identity.DeviceID {
-		if err := d.sendSwitchBack(previous); err != nil {
+	seen := make(map[string]struct{}, 2)
+	for _, peer := range []string{previous, activeLeasePeer, remotePeer} {
+		if peer == "" || peer == d.identity.DeviceID {
+			continue
+		}
+		if _, ok := seen[peer]; ok {
+			continue
+		}
+		seen[peer] = struct{}{}
+		if peer == remotePeer {
+			d.clearRemoteControl(peer)
+		}
+		leaseID := ""
+		if peer == activeLeasePeer {
+			leaseID = activeLeaseID
+		}
+		if peer == remotePeer {
+			leaseID = remoteLeaseID
+		}
+		if err := d.sendSwitchBack(peer, leaseID); err != nil {
 			d.broadcast(BusEvent{Kind: "error", Msg: "switch back: " + err.Error()})
 		}
-		d.clearRemoteControl(previous)
+		d.clearActiveLease(peer, leaseID)
 	}
+	d.controlMu.Lock()
+	d.activeLeasePeer = ""
+	d.activeLeaseID = ""
+	d.controlMu.Unlock()
 	if d.helper != nil {
 		d.helper.BroadcastConfig()
 	}
 }
 
 func (d *Daemon) clearRemoteControl(peer string) {
+	changed := false
 	d.controlMu.Lock()
 	if peer == "" || d.remotePeer == peer {
+		changed = d.remotePeer != "" || d.remoteEntryEdge != "" || d.remoteRequestID != "" ||
+			d.remoteLeasePhase != remoteLeaseNone || d.remoteReturnPending
 		d.remotePeer = ""
 		d.remoteEntryEdge = ""
+		d.remoteRequestID = ""
+		d.remoteLeasePhase = remoteLeaseNone
+		d.remoteReturnPending = false
+		d.settleRemoteGrantLocked()
+		d.suppressEdgesUntilLocked(controlTransitionCooldown)
+	}
+	d.controlMu.Unlock()
+	if changed && d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+}
+
+const controlTransitionCooldown = 1500 * time.Millisecond
+
+func (d *Daemon) suppressEdgesFor(duration time.Duration) {
+	d.controlMu.Lock()
+	d.suppressEdgesUntilLocked(duration)
+	d.controlMu.Unlock()
+}
+
+func (d *Daemon) suppressEdgesUntilLocked(duration time.Duration) {
+	until := time.Now().Add(duration)
+	if until.After(d.edgeSuppressedUntil) {
+		d.edgeSuppressedUntil = until
+	}
+}
+
+func (d *Daemon) edgeEventsSuppressed() bool {
+	d.controlMu.RLock()
+	suppressed := time.Now().Before(d.edgeSuppressedUntil)
+	d.controlMu.RUnlock()
+	return suppressed
+}
+
+func (d *Daemon) beginLocalTransition() bool {
+	d.controlMu.Lock()
+	defer d.controlMu.Unlock()
+	if d.localTransitionPending {
+		return false
+	}
+	d.localTransitionPending = true
+	return true
+}
+
+func (d *Daemon) waitForRemoteGrantConfirmation() bool {
+	timer := time.NewTimer(switchRequestTimeout)
+	defer timer.Stop()
+	for {
+		d.controlMu.RLock()
+		pending := d.remoteGrantPending
+		peer := d.remotePeer
+		ready := d.remoteLeasePhase == remoteLeaseActive
+		d.controlMu.RUnlock()
+		if pending == nil {
+			return true
+		}
+		select {
+		case <-pending:
+			d.controlMu.RLock()
+			stillPending := d.remoteGrantPending
+			stillOwned := d.remotePeer == peer
+			ready = d.remoteLeasePhase == remoteLeaseActive
+			d.controlMu.RUnlock()
+			if !stillOwned || ready || stillPending == nil {
+				return true
+			}
+		case <-timer.C:
+			return false
+		}
+	}
+}
+
+func (d *Daemon) settleRemoteGrantLocked() {
+	if d.remoteGrantPending != nil {
+		close(d.remoteGrantPending)
+		d.remoteGrantPending = nil
+	}
+}
+
+func (d *Daemon) remoteLeaseID(peer string) string {
+	d.controlMu.RLock()
+	defer d.controlMu.RUnlock()
+	if d.remotePeer == peer {
+		return d.remoteRequestID
+	}
+	if d.activeLeasePeer == peer {
+		return d.activeLeaseID
+	}
+	return ""
+}
+
+func (d *Daemon) activeLeaseIDSnapshot() string {
+	d.controlMu.RLock()
+	defer d.controlMu.RUnlock()
+	return d.activeLeaseID
+}
+
+func (d *Daemon) activeLeasePeerSnapshot() string {
+	d.controlMu.RLock()
+	defer d.controlMu.RUnlock()
+	return d.activeLeasePeer
+}
+
+func (d *Daemon) setActiveLease(peer, leaseID string) {
+	d.controlMu.Lock()
+	if d.ctrl.ActiveTarget() == peer {
+		d.activeLeasePeer = peer
+		d.activeLeaseID = leaseID
 	}
 	d.controlMu.Unlock()
 }
 
-func (d *Daemon) sendSwitchRequest(deviceID, trigger, edge string, entryPct float64) error {
-	payload := event.SwitchRequestPayload{Trigger: trigger, Edge: edge, EntryPct: entryPct}
-	return d.sendPeerSwitchMessage(deviceID, event.TypeSwitchRequest, payload)
+func (d *Daemon) clearActiveLease(peer, leaseID string) {
+	d.controlMu.Lock()
+	if d.activeLeasePeer == peer && d.activeLeaseID == leaseID && d.ctrl.ActiveTarget() != peer {
+		d.activeLeasePeer = ""
+		d.activeLeaseID = ""
+	}
+	d.controlMu.Unlock()
 }
 
-func (d *Daemon) sendSwitchBack(deviceID string) error {
-	return d.sendPeerSwitchMessage(deviceID, event.TypeSwitchBack, struct{}{})
+func (d *Daemon) endLocalTransition() {
+	d.controlMu.Lock()
+	d.localTransitionPending = false
+	d.controlMu.Unlock()
+}
+
+const switchRequestTimeout = 2 * time.Second
+
+func (d *Daemon) requestSwitch(deviceID, trigger, edge string, entryPct float64) (bool, string, error) {
+	requestID, pending := d.newPendingSwitchRequest(deviceID)
+
+	payload := event.SwitchRequestPayload{RequestID: requestID, Trigger: trigger, Edge: edge, EntryPct: entryPct}
+	if err := d.sendPeerSwitchMessage(deviceID, event.TypeSwitchRequest, payload); err != nil {
+		d.removePendingSwitch(requestID)
+		return false, requestID, err
+	}
+
+	timer := time.NewTimer(switchRequestTimeout)
+	defer timer.Stop()
+	select {
+	case ack := <-pending.ack:
+		d.pendingSwitchMu.Lock()
+		canceled := pending.canceled
+		delete(d.pendingSwitches, requestID)
+		d.pendingSwitchMu.Unlock()
+		if canceled {
+			return false, requestID, fmt.Errorf("switch lease was released before activation")
+		}
+		if !ack.Granted {
+			return false, requestID, fmt.Errorf("switch request rejected: %s", ack.Reason)
+		}
+		return true, requestID, nil
+	case <-timer.C:
+		d.removePendingSwitch(requestID)
+		_ = d.sendSwitchBack(deviceID, requestID)
+		return false, requestID, fmt.Errorf("switch request timed out")
+	}
+}
+
+func (d *Daemon) releasePeerAndWait(deviceID, leaseID string) error {
+	requestID, pending := d.newPendingSwitchRequest(deviceID)
+	payload := event.SwitchBackPayload{RequestID: requestID, LeaseID: leaseID}
+	if err := d.sendPeerSwitchMessage(deviceID, event.TypeSwitchBack, payload); err != nil {
+		d.removePendingSwitch(requestID)
+		return err
+	}
+	timer := time.NewTimer(switchRequestTimeout)
+	defer timer.Stop()
+	select {
+	case ack := <-pending.ack:
+		d.removePendingSwitch(requestID)
+		if !ack.Released {
+			return fmt.Errorf("switch release rejected: %s", ack.Reason)
+		}
+		return nil
+	case <-timer.C:
+		d.removePendingSwitch(requestID)
+		// A bounded, uncorrelated cleanup handles a lost ACK without activating
+		// another target. Releasing an already-cleared lease is idempotent.
+		_ = d.sendSwitchBack(deviceID, leaseID)
+		d.clearRemoteControl(deviceID)
+		d.clearActiveLease(deviceID, leaseID)
+		return fmt.Errorf("switch release timed out")
+	}
+}
+
+func (d *Daemon) newPendingSwitchRequest(deviceID string) (string, *pendingSwitchRequest) {
+	d.pendingSwitchMu.Lock()
+	d.switchRequestCount++
+	requestID := fmt.Sprintf("%s-%d", d.identity.DeviceID, d.switchRequestCount)
+	pending := &pendingSwitchRequest{deviceID: deviceID, ack: make(chan event.SwitchAckPayload, 1)}
+	d.pendingSwitches[requestID] = pending
+	d.pendingSwitchMu.Unlock()
+	return requestID, pending
+}
+
+func (d *Daemon) removePendingSwitch(requestID string) {
+	d.pendingSwitchMu.Lock()
+	delete(d.pendingSwitches, requestID)
+	d.pendingSwitchMu.Unlock()
+}
+
+func (d *Daemon) cancelPendingSwitchRequests(deviceID string) {
+	d.pendingSwitchMu.Lock()
+	defer d.pendingSwitchMu.Unlock()
+	for _, pending := range d.pendingSwitches {
+		if pending.deviceID != deviceID {
+			continue
+		}
+		select {
+		case pending.ack <- event.SwitchAckPayload{Granted: false, Reason: "session_disconnected"}:
+		default:
+		}
+	}
+}
+
+// HandleRemoteSwitchAck completes only the pending request for this peer and ID.
+func (d *Daemon) HandleRemoteSwitchAck(deviceID string, ack event.SwitchAckPayload) {
+	if ack.RequestID == "" {
+		return
+	}
+	d.pendingSwitchMu.Lock()
+	pending := d.pendingSwitches[ack.RequestID]
+	if pending == nil || pending.deviceID != deviceID {
+		d.pendingSwitchMu.Unlock()
+		return
+	}
+	select {
+	case pending.ack <- ack:
+	default:
+	}
+	d.pendingSwitchMu.Unlock()
+}
+
+func (d *Daemon) sendSwitchBack(deviceID, leaseID string) error {
+	return d.sendPeerSwitchMessage(deviceID, event.TypeSwitchBack, event.SwitchBackPayload{LeaseID: leaseID})
 }
 
 func (d *Daemon) sendPeerSwitchMessage(deviceID, messageType string, payload interface{}) error {
@@ -1539,30 +1942,123 @@ func (d *Daemon) sendPeerSwitchMessage(deviceID, messageType string, payload int
 }
 
 // HandleRemoteSwitchRequest applies a control handoff initiated by a connected peer.
-func (d *Daemon) HandleRemoteSwitchRequest(deviceID string, pay event.SwitchRequestPayload) {
+func (d *Daemon) HandleRemoteSwitchRequest(deviceID string, pay event.SwitchRequestPayload) event.SwitchAckPayload {
+	ack := event.SwitchAckPayload{RequestID: pay.RequestID}
 	if !d.hasSessionDevice(deviceID) {
-		return
+		ack.Reason = "no_active_session"
+		return ack
+	}
+	if pay.RequestID == "" {
+		ack.Reason = "request_id_required"
+		return ack
 	}
 	d.controlMu.Lock()
+	if d.localTransitionPending {
+		d.controlMu.Unlock()
+		ack.Reason = "local_switch_transition_pending"
+		return ack
+	}
+	if d.remotePeer == deviceID && d.remoteRequestID == pay.RequestID {
+		d.controlMu.Unlock()
+		ack.Granted = true
+		return ack
+	}
+	if d.remotePeer != "" {
+		d.controlMu.Unlock()
+		ack.Reason = "control_owned_by_another_peer"
+		return ack
+	}
+	if d.ctrl.ActiveTarget() != d.identity.DeviceID || d.activeLeasePeer != "" {
+		d.controlMu.Unlock()
+		ack.Reason = "local_daemon_is_controlling_another_peer"
+		return ack
+	}
 	d.remotePeer = deviceID
 	d.remoteEntryEdge = pay.Edge
+	d.remoteRequestID = pay.RequestID
+	d.remoteLeasePhase = remoteLeaseGrantPending
+	d.remoteGrantPending = make(chan struct{})
+	d.remoteReturnPending = false
+	d.suppressEdgesUntilLocked(controlTransitionCooldown)
 	d.controlMu.Unlock()
-	d.ctrl.SwitchTo(deviceID)
 	if d.helper != nil {
 		d.helper.BroadcastConfig()
 	}
+	ack.Granted = true
+	return ack
 }
 
-// HandleRemoteSwitchBack returns control to this device when its active peer exits.
-func (d *Daemon) HandleRemoteSwitchBack(deviceID string) {
-	if d.ctrl.ActiveTarget() != deviceID {
-		return
+// CanReceiveInput permits data only from the peer holding the current switch grant.
+func (d *Daemon) CanReceiveInput(deviceID string) bool {
+	d.controlMu.RLock()
+	granted := d.remotePeer == deviceID && d.remoteRequestID != "" && d.remoteLeasePhase == remoteLeaseActive
+	d.controlMu.RUnlock()
+	return granted && d.hasSessionDevice(deviceID)
+}
+
+// ConfirmRemoteSwitchGrant marks the lease active only after its grant ACK was written.
+func (d *Daemon) ConfirmRemoteSwitchGrant(deviceID, requestID string) {
+	d.controlMu.Lock()
+	if d.remotePeer == deviceID && d.remoteRequestID == requestID && requestID != "" {
+		d.remoteLeasePhase = remoteLeaseActive
+		d.settleRemoteGrantLocked()
 	}
-	d.ctrl.SwitchBack()
-	d.clearRemoteControl(deviceID)
+	d.controlMu.Unlock()
+}
+
+// HandleRemoteSwitchBack applies a peer's return notification without creating a new handoff.
+func (d *Daemon) HandleRemoteSwitchBack(deviceID string, pay event.SwitchBackPayload) event.SwitchAckPayload {
+	ack := event.SwitchAckPayload{RequestID: pay.RequestID}
+	if pay.LeaseID == "" {
+		ack.Reason = "lease_id_required"
+		return ack
+	}
+	d.pendingSwitchMu.Lock()
+	if pending := d.pendingSwitches[pay.LeaseID]; pending != nil && pending.deviceID == deviceID {
+		pending.canceled = true
+	}
+	d.pendingSwitchMu.Unlock()
+	d.transitionMu.Lock()
+	defer d.transitionMu.Unlock()
+	activeTarget := d.ctrl.ActiveTarget()
+	d.controlMu.Lock()
+	controlledByPeer := d.remotePeer == deviceID
+	hasRemoteOwner := d.remotePeer != ""
+	activeLeaseMatches := activeTarget == deviceID && d.activeLeasePeer == deviceID && d.activeLeaseID == pay.LeaseID
+	remoteLeaseMatches := controlledByPeer && d.remoteRequestID == pay.LeaseID
+	if !activeLeaseMatches && !remoteLeaseMatches {
+		d.controlMu.Unlock()
+		if activeTarget == d.identity.DeviceID && !hasRemoteOwner {
+			ack.Released = true // Idempotent release after a lost ACK.
+		} else {
+			ack.Reason = "lease_not_owned"
+		}
+		return ack
+	}
+	if remoteLeaseMatches {
+		d.remotePeer = ""
+		d.remoteEntryEdge = ""
+		d.remoteRequestID = ""
+		d.remoteLeasePhase = remoteLeaseNone
+		d.remoteReturnPending = false
+		d.settleRemoteGrantLocked()
+		d.suppressEdgesUntilLocked(controlTransitionCooldown)
+	}
+	if activeLeaseMatches {
+		d.activeLeasePeer = ""
+		d.activeLeaseID = ""
+	}
+	d.controlMu.Unlock()
+	if activeLeaseMatches {
+		d.ctrl.SwitchBack()
+		d.releaseRemoteKeys(deviceID)
+	}
+	d.suppressEdgesFor(controlTransitionCooldown)
 	if d.helper != nil {
 		d.helper.BroadcastConfig()
 	}
+	ack.Released = true
+	return ack
 }
 
 func (d *Daemon) hasSessionDevice(deviceID string) bool {
