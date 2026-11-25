@@ -6,15 +6,17 @@ import (
 )
 
 const (
-	TypeRegister     = "register"
-	TypeConfigPush   = "config_push"
-	TypeHotkey       = "hotkey"
-	TypeEdge         = "edge"
-	TypeInput        = "input"
-	TypeClipboard    = "clipboard_update"
-	TypeClipboardSet = "clipboard_set"
-	TypeAck          = "ack"
-	TypeError        = "error"
+	TypeRegister       = "register"
+	TypeConfigPush     = "config_push"
+	TypeHotkey         = "hotkey"
+	TypeEdge           = "edge"
+	TypeInput          = "input"
+	TypeClipboard      = "clipboard_update"
+	TypeClipboardSet   = "clipboard_set"
+	TypeSecureRequest  = "secure_request"
+	TypeSecureResponse = "secure_response"
+	TypeAck            = "ack"
+	TypeError          = "error"
 )
 
 // Envelope is the JSON-lines message container for daemon <-> helper IPC.
@@ -107,6 +109,21 @@ type ClipboardLocalFile struct {
 	Path      string `json:"path"`
 	Name      string `json:"name"`
 	Directory bool   `json:"directory,omitempty"`
+}
+
+// SecureRequest asks the local helper to access an item in the macOS Keychain.
+type SecureRequest struct {
+	RequestID string `json:"request_id"`
+	Operation string `json:"operation"`
+	Key       string `json:"key"`
+	Value     string `json:"value,omitempty"`
+}
+
+// SecureResponse returns a Keychain value or operation error.
+type SecureResponse struct {
+	RequestID string `json:"request_id"`
+	Value     string `json:"value,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // AckPayload confirms a successful register.

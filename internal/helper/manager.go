@@ -2,12 +2,15 @@ package helper
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -24,6 +27,8 @@ type Manager struct {
 	mu       sync.RWMutex
 	listener net.Listener
 	clients  map[*client]struct{}
+	secureMu sync.Mutex
+	secure   map[string]chan SecureResponse
 }
 
 type client struct {
@@ -40,6 +45,7 @@ func NewManager(socketPath string, snapshotFn func() ConfigPushPayload, onHotkey
 		onEdge:     onEdge,
 		onInput:    onInput,
 		clients:    make(map[*client]struct{}),
+		secure:     make(map[string]chan SecureResponse),
 	}
 }
 
@@ -153,6 +159,56 @@ func (m *Manager) BroadcastClipboard(payload ClipboardPayload) {
 	}
 }
 
+// RequestSecureValue performs a Keychain operation through the signed macOS helper.
+func (m *Manager) RequestSecureValue(operation, key, value string) (string, error) {
+	var requestIDBytes [12]byte
+	if _, err := rand.Read(requestIDBytes[:]); err != nil {
+		return "", err
+	}
+	requestID := hex.EncodeToString(requestIDBytes[:])
+	responseCh := make(chan SecureResponse, 1)
+	m.secureMu.Lock()
+	m.secure[requestID] = responseCh
+	m.secureMu.Unlock()
+
+	m.mu.RLock()
+	var target *client
+	for c := range m.clients {
+		target = c
+		break
+	}
+	m.mu.RUnlock()
+	if target == nil {
+		m.secureMu.Lock()
+		delete(m.secure, requestID)
+		m.secureMu.Unlock()
+		return "", fmt.Errorf("macOS helper is not connected")
+	}
+	if err := target.send(TypeSecureRequest, SecureRequest{
+		RequestID: requestID,
+		Operation: operation,
+		Key:       key,
+		Value:     value,
+	}); err != nil {
+		m.secureMu.Lock()
+		delete(m.secure, requestID)
+		m.secureMu.Unlock()
+		return "", err
+	}
+	select {
+	case response := <-responseCh:
+		if response.Error != "" {
+			return "", fmt.Errorf("Keychain %s: %s", operation, response.Error)
+		}
+		return response.Value, nil
+	case <-time.After(5 * time.Second):
+		m.secureMu.Lock()
+		delete(m.secure, requestID)
+		m.secureMu.Unlock()
+		return "", fmt.Errorf("Keychain %s timed out", operation)
+	}
+}
+
 func (m *Manager) acceptLoop(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
@@ -246,6 +302,18 @@ func (m *Manager) handleConn(conn net.Conn) {
 			m.mu.RUnlock()
 			if handler != nil {
 				handler(payload)
+			}
+		case TypeSecureResponse:
+			var response SecureResponse
+			if err := DecodePayload(next, &response); err != nil || response.RequestID == "" {
+				continue
+			}
+			m.secureMu.Lock()
+			ch := m.secure[response.RequestID]
+			delete(m.secure, response.RequestID)
+			m.secureMu.Unlock()
+			if ch != nil {
+				ch <- response
 			}
 		}
 	}
