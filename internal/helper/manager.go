@@ -14,11 +14,12 @@ import (
 
 // Manager owns the daemon-side helper socket and connected helper processes.
 type Manager struct {
-	socketPath string
-	snapshotFn func() ConfigPushPayload
-	onHotkey   func(HotkeyPayload)
-	onEdge     func(EdgePayload)
-	onInput    func(InputPayload)
+	socketPath  string
+	snapshotFn  func() ConfigPushPayload
+	onHotkey    func(HotkeyPayload)
+	onEdge      func(EdgePayload)
+	onInput     func(InputPayload)
+	onClipboard func(ClipboardPayload)
 
 	mu       sync.RWMutex
 	listener net.Listener
@@ -40,6 +41,13 @@ func NewManager(socketPath string, snapshotFn func() ConfigPushPayload, onHotkey
 		onInput:    onInput,
 		clients:    make(map[*client]struct{}),
 	}
+}
+
+// SetClipboardHandler installs the handler for native clipboard changes reported by the helper.
+func (m *Manager) SetClipboardHandler(handler func(ClipboardPayload)) {
+	m.mu.Lock()
+	m.onClipboard = handler
+	m.mu.Unlock()
 }
 
 // Start begins listening for helper connections.
@@ -129,6 +137,22 @@ func (m *Manager) BroadcastInput(input InputPayload) {
 	}
 }
 
+// BroadcastClipboard sends a native clipboard entry to the local helper.
+func (m *Manager) BroadcastClipboard(payload ClipboardPayload) {
+	m.mu.RLock()
+	clients := make([]*client, 0, len(m.clients))
+	for c := range m.clients {
+		clients = append(clients, c)
+	}
+	m.mu.RUnlock()
+	for _, c := range clients {
+		if err := c.send(TypeClipboardSet, payload); err != nil {
+			log.Printf("[helper] clipboard update failed: %v", err)
+			m.removeClient(c)
+		}
+	}
+}
+
 func (m *Manager) acceptLoop(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
@@ -142,6 +166,7 @@ func (m *Manager) acceptLoop(ln net.Listener) {
 func (m *Manager) handleConn(conn net.Conn) {
 	c := &client{conn: conn}
 	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 
 	if !scanner.Scan() {
 		_ = c.send(TypeError, ErrorPayload{Message: "failed to read register"})
@@ -210,6 +235,17 @@ func (m *Manager) handleConn(conn net.Conn) {
 			}
 			if input.Kind != "" && m.onInput != nil {
 				m.onInput(input)
+			}
+		case TypeClipboard:
+			var payload ClipboardPayload
+			if err := DecodePayload(next, &payload); err != nil {
+				continue
+			}
+			m.mu.RLock()
+			handler := m.onClipboard
+			m.mu.RUnlock()
+			if handler != nil {
+				handler(payload)
 			}
 		}
 	}

@@ -19,7 +19,7 @@ type Conn struct {
 // NewConn wraps an existing net.Conn.
 func NewConn(raw net.Conn) *Conn {
 	sc := bufio.NewScanner(raw)
-	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	return &Conn{raw: raw, scanner: sc}
 }
 

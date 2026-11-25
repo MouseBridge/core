@@ -6,13 +6,15 @@ import (
 )
 
 const (
-	TypeRegister   = "register"
-	TypeConfigPush = "config_push"
-	TypeHotkey     = "hotkey"
-	TypeEdge       = "edge"
-	TypeInput      = "input"
-	TypeAck        = "ack"
-	TypeError      = "error"
+	TypeRegister     = "register"
+	TypeConfigPush   = "config_push"
+	TypeHotkey       = "hotkey"
+	TypeEdge         = "edge"
+	TypeInput        = "input"
+	TypeClipboard    = "clipboard_update"
+	TypeClipboardSet = "clipboard_set"
+	TypeAck          = "ack"
+	TypeError        = "error"
 )
 
 // Envelope is the JSON-lines message container for daemon <-> helper IPC.
@@ -44,6 +46,8 @@ type ConfigPushPayload struct {
 	ScrollSpeed              float64           `json:"scroll_speed"`
 	ShakeToLocateEnabled     bool              `json:"shake_to_locate_enabled"`
 	ShakeToLocateSensitivity string            `json:"shake_to_locate_sensitivity"`
+	ClipboardEnabled         bool              `json:"clipboard_enabled"`
+	ClipboardAllowServerSync bool              `json:"clipboard_allow_server_sync"`
 }
 
 // DaemonInfo identifies the local daemon the helper is attached to.
@@ -86,6 +90,23 @@ type InputPayload struct {
 	Button     string   `json:"button,omitempty"`
 	Pressed    bool     `json:"pressed,omitempty"`
 	ClickCount int      `json:"click_count,omitempty"`
+}
+
+// ClipboardPayload carries supported native clipboard representations.
+type ClipboardPayload struct {
+	Text          string               `json:"text,omitempty"`
+	HTML          string               `json:"html,omitempty"`
+	ImageBase64   string               `json:"image_base64,omitempty"`
+	ImageMIMEType string               `json:"image_mime_type,omitempty"`
+	Files         []ClipboardLocalFile `json:"files,omitempty"`
+	ContentSHA    string               `json:"content_sha,omitempty"`
+}
+
+// ClipboardLocalFile is a path on the local machine and is never sent over P2P.
+type ClipboardLocalFile struct {
+	Path      string `json:"path"`
+	Name      string `json:"name"`
+	Directory bool   `json:"directory,omitempty"`
 }
 
 // AckPayload confirms a successful register.

@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -21,7 +20,9 @@ import (
 	"time"
 
 	"github.com/mousebridge/core/internal/event"
+	"github.com/mousebridge/core/internal/helper"
 	"github.com/mousebridge/core/internal/transport"
+	log "github.com/sirupsen/logrus"
 )
 
 // ClipboardStatus represents the current state of cross-machine clipboard synchronization.
@@ -30,6 +31,7 @@ type ClipboardStatus struct {
 	AllowServerSync     bool      `json:"allow_server_sync"`
 	LastText            string    `json:"last_text,omitempty"`
 	LastSHA256          string    `json:"last_sha256,omitempty"`
+	LastFormats         []string  `json:"last_formats,omitempty"`
 	LastSourceID        string    `json:"last_source_id,omitempty"`
 	UpdatedAt           int64     `json:"updated_at,omitempty"`
 	lastSystemWriteSHA  string    `json:"-"`
@@ -137,6 +139,16 @@ func (d *Daemon) UpdateClipboardSettings(enabled *bool, allowServerSync *bool) C
 	}
 	snap := d.clipStatus
 	d.clipMu.Unlock()
+	d.cfg.ClipboardSyncEnabled = snap.Enabled
+	d.cfg.ClipboardAllowServerSync = snap.AllowServerSync
+	if d.configPath != "" {
+		if err := d.cfg.Save(d.configPath); err != nil {
+			log.Warnf("[clipboard] save settings failed: %v", err)
+		}
+	}
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
 	d.broadcast(BusEvent{Kind: "log", Msg: fmt.Sprintf("clipboard settings updated enabled=%t allow_server_sync=%t", snap.Enabled, snap.AllowServerSync)})
 	return snap
 }
@@ -152,10 +164,32 @@ func (d *Daemon) SendClipboard(targetDeviceID string, text string) (ClipboardSta
 	if text == "" {
 		return d.ClipboardStatusSnapshot(), fmt.Errorf("clipboard text is empty")
 	}
-	const maxClipboardBytes = 512 * 1024
-	if len(text) > maxClipboardBytes {
-		text = strings.ToValidUTF8(text[:maxClipboardBytes], "")
+	return d.SendClipboardEntry(targetDeviceID, event.ClipboardSyncPayload{Text: text})
+}
+
+// SendClipboardEntry sends the native representations of one clipboard item.
+func (d *Daemon) SendClipboardEntry(targetDeviceID string, payload event.ClipboardSyncPayload) (ClipboardStatus, error) {
+	if payload.Text == "" && payload.HTML == "" && payload.ImageBase64 == "" && len(payload.Files) == 0 {
+		return d.ClipboardStatusSnapshot(), fmt.Errorf("clipboard entry has no supported formats")
 	}
+	if len(payload.Text)+len(payload.HTML)+len(payload.ImageBase64) > 14*1024*1024 {
+		return d.ClipboardStatusSnapshot(), fmt.Errorf("clipboard entry exceeds 14 MB")
+	}
+	if len(payload.Files) > 32 {
+		return d.ClipboardStatusSnapshot(), fmt.Errorf("clipboard entry contains more than 32 files")
+	}
+	if payload.ImageBase64 != "" {
+		if payload.ImageMIMEType != "image/png" && payload.ImageMIMEType != "image/tiff" {
+			return d.ClipboardStatusSnapshot(), fmt.Errorf("clipboard image must be PNG or TIFF")
+		}
+		if _, err := base64.StdEncoding.DecodeString(payload.ImageBase64); err != nil {
+			return d.ClipboardStatusSnapshot(), fmt.Errorf("invalid clipboard image encoding")
+		}
+	}
+	payload.Text = strings.ToValidUTF8(payload.Text, "")
+	payload.HTML = strings.ToValidUTF8(payload.HTML, "")
+	payload.ContentSHA = clipboardEntrySHA(payload)
+	payload.SourceID = d.identity.DeviceID
 
 	d.clipMu.Lock()
 	if !d.clipStatus.Enabled {
@@ -163,12 +197,13 @@ func (d *Daemon) SendClipboard(targetDeviceID string, text string) (ClipboardSta
 		d.clipMu.Unlock()
 		return snap, fmt.Errorf("clipboard sync is disabled")
 	}
-	sha := sha256Hex([]byte(text))
+	sha := payload.ContentSHA
 	now := time.Now().UnixMilli()
-	d.clipStatus.LastText = text
+	d.clipStatus.LastText = payload.Text
 	d.clipStatus.LastSHA256 = sha
-	d.clipStatus.lastSystemWriteSHA = sha
+	d.clipStatus.LastFormats = clipboardFormats(payload)
 	d.clipStatus.LastSourceID = d.identity.DeviceID
+	d.clipStatus.lastSystemWriteSHA = ""
 	d.clipStatus.UpdatedAt = now
 	snap := d.clipStatus
 	d.clipMu.Unlock()
@@ -179,15 +214,11 @@ func (d *Daemon) SendClipboard(targetDeviceID string, text string) (ClipboardSta
 	}
 
 	msg := event.Message{
-		V:    1,
-		Seq:  now,
-		Type: event.TypeClipboardSync,
-		Ts:   now,
-		Payload: event.ClipboardSyncPayload{
-			Text:       text,
-			ContentSHA: sha,
-			SourceID:   d.identity.DeviceID,
-		},
+		V:       1,
+		Seq:     now,
+		Type:    event.TypeClipboardSync,
+		Ts:      now,
+		Payload: payload,
 	}
 
 	var firstErr error
@@ -204,23 +235,223 @@ func (d *Daemon) SendClipboard(targetDeviceID string, text string) (ClipboardSta
 	if sentCount == 0 && firstErr != nil {
 		return snap, firstErr
 	}
-
 	d.broadcast(BusEvent{
 		Kind:     "clipboard_synced",
 		DeviceID: targetDeviceID,
-		Msg:      fmt.Sprintf("clipboard sent (%d bytes)", len(text)),
+		Msg:      fmt.Sprintf("clipboard sent (%d bytes, %s)", len(payload.Text)+len(payload.HTML)+len(payload.ImageBase64), strings.Join(clipboardFormats(payload), ",")),
 	})
 	return snap, nil
+}
+
+func clipboardEntrySHA(payload event.ClipboardSyncPayload) string {
+	payload.ContentSHA = ""
+	payload.SourceID = ""
+	for i := range payload.Files {
+		payload.Files[i].TransferID = ""
+	}
+	data, _ := json.Marshal(payload)
+	return sha256Hex(data)
+}
+
+func clipboardFormats(payload event.ClipboardSyncPayload) []string {
+	formats := make([]string, 0, 3)
+	if payload.Text != "" {
+		formats = append(formats, "text/plain")
+	}
+	if payload.HTML != "" {
+		formats = append(formats, "text/html")
+	}
+	if payload.ImageBase64 != "" {
+		formats = append(formats, payload.ImageMIMEType)
+	}
+	if len(payload.Files) > 0 {
+		formats = append(formats, "public.file-url")
+	}
+	return formats
+}
+
+// HandleLocalClipboard accepts native clipboard changes reported by the macOS helper.
+func (d *Daemon) HandleLocalClipboard(payload helper.ClipboardPayload) {
+	base := event.ClipboardSyncPayload{
+		Text:          payload.Text,
+		HTML:          payload.HTML,
+		ImageBase64:   payload.ImageBase64,
+		ImageMIMEType: payload.ImageMIMEType,
+	}
+	if len(payload.Files) > 0 {
+		go d.sendClipboardFiles(payload, base)
+		return
+	}
+	_, err := d.SendClipboardEntry("", base)
+	if err != nil && err.Error() != "clipboard sync is disabled" && err.Error() != "no active session for clipboard sync" {
+		log.Warnf("[clipboard] local clipboard sync failed: %v", err)
+	}
+}
+
+func (d *Daemon) sendClipboardFiles(local helper.ClipboardPayload, base event.ClipboardSyncPayload) {
+	d.clipMu.RLock()
+	enabled := d.clipStatus.Enabled
+	d.clipMu.RUnlock()
+	if !enabled {
+		return
+	}
+	if len(local.Files) > 32 {
+		local.Files = local.Files[:32]
+	}
+	peers := make(map[string]struct{})
+	d.connsMu.Lock()
+	for _, deviceID := range d.conns {
+		if deviceID != "" {
+			peers[deviceID] = struct{}{}
+		}
+	}
+	d.connsMu.Unlock()
+	for peerID := range peers {
+		entry := base
+		entry.Files = make([]event.ClipboardFile, 0, len(local.Files))
+		var totalBytes int64
+		for _, file := range local.Files {
+			path := expandHomePath(file.Path)
+			info, err := os.Lstat(path)
+			if err != nil || info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+				continue
+			}
+			digest, size, err := clipboardPathDigest(path, info.IsDir())
+			if err != nil || size > 2*1024*1024*1024 || totalBytes+size > 2*1024*1024*1024 {
+				continue
+			}
+			transfer, err := d.SendFileFromPath(peerID, path)
+			if err != nil || transfer.Status != "completed" {
+				continue
+			}
+			totalBytes += size
+			entry.Files = append(entry.Files, event.ClipboardFile{
+				TransferID: transfer.TransferID,
+				Name:       filepath.Base(path),
+				Directory:  info.IsDir(),
+				SHA256:     digest,
+			})
+		}
+		if entry.Text == "" && entry.HTML == "" && entry.ImageBase64 == "" && len(entry.Files) == 0 {
+			continue
+		}
+		if _, err := d.SendClipboardEntry(peerID, entry); err != nil {
+			log.Warnf("[clipboard] send file clipboard to %s failed: %v", peerID, err)
+		}
+	}
+}
+
+func clipboardPathDigest(path string, isDirectory bool) (string, int64, error) {
+	h := sha256.New()
+	var total int64
+	addFile := func(filePath, relative string, isDir bool) error {
+		name := filepath.ToSlash(relative)
+		_, _ = fmt.Fprintf(h, "%d:%s:", len(name), name)
+		if isDir {
+			_, _ = h.Write([]byte("directory\n"))
+			return nil
+		}
+		file, err := os.Open(filePath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		copied, err := io.Copy(h, file)
+		total += copied
+		_, _ = h.Write([]byte("\n"))
+		return err
+	}
+	if !isDirectory {
+		if err := addFile(path, "", false); err != nil {
+			return "", 0, err
+		}
+		return hex.EncodeToString(h.Sum(nil)), total, nil
+	}
+	root := filepath.Clean(path)
+	err := filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if current == root {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		relative, err := filepath.Rel(root, current)
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return addFile(current, relative, true)
+		}
+		if entry.Type().IsRegular() {
+			return addFile(current, relative, false)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", total, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), total, nil
 }
 
 // HandleRemoteClipboard processes incoming clipboard_sync messages from a connected peer.
 func (d *Daemon) HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncPayload) {
 	cleanText := strings.ToValidUTF8(pay.Text, "")
-	if cleanText == "" {
+	if cleanText == "" && pay.HTML == "" && pay.ImageBase64 == "" && len(pay.Files) == 0 {
 		return
 	}
-	sha := sha256Hex([]byte(cleanText))
-
+	if len(pay.Text)+len(pay.HTML)+len(pay.ImageBase64) > 14*1024*1024 {
+		return
+	}
+	if len(pay.Files) > 32 {
+		return
+	}
+	for _, file := range pay.Files {
+		if file.TransferID == "" || file.Name == "" || len(file.Name) > 255 || filepath.Base(file.Name) != file.Name || file.SHA256 == "" {
+			return
+		}
+	}
+	if pay.ImageBase64 != "" {
+		if (pay.ImageMIMEType != "image/png" && pay.ImageMIMEType != "image/tiff") || func() bool {
+			_, err := base64.StdEncoding.DecodeString(pay.ImageBase64)
+			return err != nil
+		}() {
+			return
+		}
+	}
+	pay.Text = cleanText
+	sha := clipboardEntrySHA(pay)
+	d.clipMu.RLock()
+	allowed := d.clipStatus.Enabled && d.clipStatus.AllowServerSync
+	duplicate := d.clipStatus.LastSHA256 == sha || d.clipStatus.lastSystemWriteSHA == sha
+	d.clipMu.RUnlock()
+	if !allowed || duplicate {
+		return
+	}
+	localFiles := make([]helper.ClipboardLocalFile, 0, len(pay.Files))
+	for _, file := range pay.Files {
+		transfer := d.getTransferStatus(file.TransferID)
+		if transfer.Status != "completed" || transfer.SavedPath == "" {
+			continue
+		}
+		localPath := transfer.SavedPath
+		if file.Directory {
+			localPath, _ = d.extractClipboardDirectory(transfer.SavedPath, file.Name)
+			if localPath == "" {
+				continue
+			}
+		}
+		digest, _, err := clipboardPathDigest(localPath, file.Directory)
+		if err != nil || digest != file.SHA256 {
+			continue
+		}
+		localFiles = append(localFiles, helper.ClipboardLocalFile{Path: localPath, Name: filepath.Base(localPath), Directory: file.Directory})
+	}
+	if cleanText == "" && pay.HTML == "" && pay.ImageBase64 == "" && len(localFiles) == 0 {
+		return
+	}
 	d.clipMu.Lock()
 	if !d.clipStatus.Enabled || !d.clipStatus.AllowServerSync {
 		d.clipMu.Unlock()
@@ -233,6 +464,7 @@ func (d *Daemon) HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncP
 		return
 	}
 	d.clipStatus.LastText = cleanText
+	d.clipStatus.LastFormats = clipboardFormats(pay)
 	d.clipStatus.LastSHA256 = sha
 	d.clipStatus.lastSystemWriteSHA = sha
 	d.clipStatus.lastRemoteReceiveAt = time.Now()
@@ -240,15 +472,15 @@ func (d *Daemon) HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncP
 	d.clipStatus.UpdatedAt = time.Now().UnixMilli()
 	d.clipMu.Unlock()
 
-	if os.Getenv("MB_SYNC_SYSTEM_CLIPBOARD") == "1" && runtime.GOOS == "darwin" {
-		_ = writeSystemClipboard(cleanText)
-		if actual, err := readSystemClipboard(); err == nil && actual != "" {
-			actualSHA := sha256Hex([]byte(actual))
-			d.clipMu.Lock()
-			d.clipStatus.lastSystemWriteSHA = actualSHA
-			d.clipStatus.lastRemoteReceiveAt = time.Now()
-			d.clipMu.Unlock()
-		}
+	if runtime.GOOS == "darwin" && d.helper != nil {
+		d.helper.BroadcastClipboard(helper.ClipboardPayload{
+			Text:          pay.Text,
+			HTML:          pay.HTML,
+			ImageBase64:   pay.ImageBase64,
+			ImageMIMEType: pay.ImageMIMEType,
+			Files:         localFiles,
+			ContentSHA:    sha,
+		})
 	}
 
 	d.broadcast(BusEvent{
@@ -256,6 +488,84 @@ func (d *Daemon) HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncP
 		DeviceID: deviceID,
 		Msg:      cleanText,
 	})
+}
+
+func (d *Daemon) extractClipboardDirectory(archivePath, directoryName string) (string, error) {
+	cleanName := filepath.Base(strings.TrimSpace(directoryName))
+	if cleanName == "" || cleanName == "." || cleanName == ".." || cleanName == string(filepath.Separator) {
+		return "", fmt.Errorf("invalid directory name")
+	}
+	root := uniqueDestinationPath(d.FileDownloadDir(), cleanName)
+	reader, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", err
+	}
+	success := false
+	defer func() {
+		if !success {
+			_ = os.RemoveAll(root)
+		}
+	}()
+	var total int64
+	for _, file := range reader.File {
+		parts := strings.Split(filepath.ToSlash(file.Name), "/")
+		if len(parts) == 0 || parts[0] != cleanName {
+			return "", fmt.Errorf("invalid directory archive root")
+		}
+		relative := filepath.FromSlash(strings.Join(parts[1:], "/"))
+		if relative == "" {
+			continue
+		}
+		target := filepath.Join(root, relative)
+		cleanTarget := filepath.Clean(target)
+		rel, err := filepath.Rel(root, cleanTarget)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("directory archive path escapes destination")
+		}
+		if file.FileInfo().IsDir() {
+			if err := os.MkdirAll(cleanTarget, 0o700); err != nil {
+				return "", err
+			}
+			continue
+		}
+		if !file.Mode().IsRegular() {
+			return "", fmt.Errorf("directory archive contains a non-regular file")
+		}
+		total += int64(file.UncompressedSize64)
+		if total > 2*1024*1024*1024 {
+			return "", fmt.Errorf("directory archive exceeds 2 GB")
+		}
+		if err := os.MkdirAll(filepath.Dir(cleanTarget), 0o700); err != nil {
+			return "", err
+		}
+		source, err := file.Open()
+		if err != nil {
+			return "", err
+		}
+		out, err := os.OpenFile(cleanTarget, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			_ = source.Close()
+			return "", err
+		}
+		_, copyErr := io.Copy(out, io.LimitReader(source, int64(file.UncompressedSize64)+1))
+		closeOutErr := out.Close()
+		closeSourceErr := source.Close()
+		if copyErr != nil {
+			return "", copyErr
+		}
+		if closeOutErr != nil {
+			return "", closeOutErr
+		}
+		if closeSourceErr != nil {
+			return "", closeSourceErr
+		}
+	}
+	success = true
+	return root, nil
 }
 
 func (d *Daemon) runClipboardWatcher(ctx context.Context) {
@@ -539,24 +849,44 @@ func (d *Daemon) SendFileFromPath(targetDeviceID, filePath string) (FileTransfer
 		return FileTransferStatus{}, fmt.Errorf("stat file: %w", err)
 	}
 	if info.IsDir() {
-		var buf bytes.Buffer
-		zw := zip.NewWriter(&buf)
-		root := filepath.Clean(filePath)
-		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		root := filepath.Clean(resolved)
+		rootName := filepath.Base(root)
+		tempDir, err := os.MkdirTemp("", "mousebridge-folder-transfer-")
+		if err != nil {
+			return FileTransferStatus{}, fmt.Errorf("create folder transfer archive: %w", err)
+		}
+		defer os.RemoveAll(tempDir)
+		archivePath := filepath.Join(tempDir, rootName+".zip")
+		archiveFile, err := os.OpenFile(archivePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return FileTransferStatus{}, fmt.Errorf("create folder transfer archive: %w", err)
+		}
+		zw := zip.NewWriter(archiveFile)
+		if _, err := zw.Create(filepath.ToSlash(rootName) + "/"); err != nil {
+			_ = zw.Close()
+			_ = archiveFile.Close()
+			return FileTransferStatus{}, err
+		}
+		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
-			if entry.IsDir() {
-				return nil
-			}
-			if !entry.Type().IsRegular() {
+			if path == root {
 				return nil
 			}
 			rel, err := filepath.Rel(root, path)
 			if err != nil {
 				return err
 			}
-			f, err := zw.Create(filepath.ToSlash(filepath.Join(filepath.Base(root), rel)))
+			zipName := filepath.ToSlash(filepath.Join(rootName, rel))
+			if entry.IsDir() {
+				_, err := zw.Create(zipName + "/")
+				return err
+			}
+			if !entry.Type().IsRegular() {
+				return nil
+			}
+			f, err := zw.Create(zipName)
 			if err != nil {
 				return err
 			}
@@ -573,12 +903,17 @@ func (d *Daemon) SendFileFromPath(targetDeviceID, filePath string) (FileTransfer
 		})
 		if err != nil {
 			_ = zw.Close()
+			_ = archiveFile.Close()
 			return FileTransferStatus{}, fmt.Errorf("zip directory: %w", err)
 		}
 		if err := zw.Close(); err != nil {
+			_ = archiveFile.Close()
 			return FileTransferStatus{}, err
 		}
-		return d.SendFileFromBytes(targetDeviceID, filepath.Base(root)+".zip", buf.Bytes())
+		if err := archiveFile.Close(); err != nil {
+			return FileTransferStatus{}, err
+		}
+		return d.SendFileFromPath(targetDeviceID, archivePath)
 	}
 
 	hasher := sha256.New()

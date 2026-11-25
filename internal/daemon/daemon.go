@@ -192,8 +192,8 @@ func New(opts Options) (*Daemon, error) {
 		httpConnCh:        make(chan net.Conn, 64),
 		captureEnabled:    true,
 		clipStatus: ClipboardStatus{
-			Enabled:         true,
-			AllowServerSync: true,
+			Enabled:         cfg.ClipboardSyncEnabled,
+			AllowServerSync: cfg.ClipboardAllowServerSync,
 		},
 		fileDownloadDir: expandHomePath("~/Downloads/MouseBridge"),
 		fileTransfers:   make(map[string]*FileTransferStatus),
@@ -209,6 +209,7 @@ func New(opts Options) (*Daemon, error) {
 		d.handleHelperEdge,
 		d.handleHelperInput,
 	)
+	d.helper.SetClipboardHandler(d.HandleLocalClipboard)
 	d.localHelper = localhelper.NewRuntime(opts.DataDir, d.helper.ClientCount)
 	d.localLab = locallab.NewRunner(opts.DataDir)
 	d.localValidation = localvalidate.NewRunner(opts.DataDir)
@@ -264,7 +265,6 @@ func (d *Daemon) Start() error {
 	})
 
 	go transport.Serve(ln, d.handleP2P, d.handleHTTP)
-	go d.runClipboardWatcher(ctx)
 	if d.cfg.KeepAwakeEnabled {
 		if _, err := d.applyKeepAwake(true); err != nil {
 			log.Warnf("[daemon] keep-awake request unavailable: %v", err)
@@ -991,6 +991,8 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 		ScrollSpeed:              scrollSpeed,
 		ShakeToLocateEnabled:     shakeEnabled,
 		ShakeToLocateSensitivity: shakeSens,
+		ClipboardEnabled:         d.ClipboardStatusSnapshot().Enabled,
+		ClipboardAllowServerSync: d.ClipboardStatusSnapshot().AllowServerSync,
 	}
 }
 

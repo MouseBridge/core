@@ -21,6 +21,8 @@ type Config struct {
 	RememberedEnabled            bool `json:"remembered_enabled"`
 	RememberedAutoConnectEnabled bool `json:"remembered_auto_connect_enabled"`
 	KeepAwakeEnabled             bool `json:"keep_awake_enabled"`
+	ClipboardSyncEnabled         bool `json:"clipboard_sync_enabled"`
+	ClipboardAllowServerSync     bool `json:"clipboard_allow_server_sync"`
 
 	PairingPINTTLSeconds  int `json:"pairing_pin_ttl_seconds"`
 	PairingPINMaxAttempts int `json:"pairing_pin_max_attempts"`
@@ -64,6 +66,8 @@ func Default() *Config {
 		UnsafeHTTPLAN:                false,
 		RememberedEnabled:            true,
 		RememberedAutoConnectEnabled: true,
+		ClipboardSyncEnabled:         true,
+		ClipboardAllowServerSync:     true,
 		PairingPINTTLSeconds:         120,
 		PairingPINMaxAttempts:        3,
 		ConnectTimeoutSeconds:        5,
