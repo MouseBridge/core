@@ -32,6 +32,7 @@ type Config struct {
 	ShakeSensitivity      string      `json:"shake_sensitivity"`
 	Hotkeys               Hotkeys     `json:"hotkeys"`
 	EdgeTargets           EdgeTargets `json:"edge_targets"`
+	EdgeLayoutConfigured  bool        `json:"edge_layout_configured,omitempty"`
 
 	// DeviceName is user-configurable; DeviceID is always derived, never stored.
 	DeviceName string `json:"device_name,omitempty"`

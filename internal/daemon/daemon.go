@@ -617,6 +617,22 @@ func (d *Daemon) UpdateHotkeys(h config.Hotkeys) error {
 	return nil
 }
 
+// UpdateEdgeTargets replaces the controller's screen-side layout, persists it,
+// and pushes the new mapping to the local helper.
+func (d *Daemon) UpdateEdgeTargets(targets config.EdgeTargets) error {
+	d.cfg.EdgeTargets = targets
+	d.cfg.EdgeLayoutConfigured = true
+	if d.configPath != "" {
+		if err := d.cfg.Save(d.configPath); err != nil {
+			return err
+		}
+	}
+	if d.helper != nil {
+		d.helper.BroadcastConfig()
+	}
+	return nil
+}
+
 // PointerSpeeds returns the configured mouse movement and scroll amplification multipliers.
 func (d *Daemon) PointerSpeeds() (float64, float64) {
 	d.pausedMu.RLock()
@@ -955,6 +971,7 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 			"top":    d.cfg.EdgeTargets.Top,
 			"bottom": d.cfg.EdgeTargets.Bottom,
 		},
+		EdgeLayoutConfigured:     d.cfg.EdgeLayoutConfigured,
 		ActiveTarget:             activeTarget,
 		ControlledByRemote:       controlledByRemote,
 		Paused:                   d.Paused(),
@@ -1004,7 +1021,7 @@ func (d *Daemon) handleHelperEdge(ev helper.EdgePayload) {
 	}
 
 	target := d.edgeTargetFor(ev.Edge)
-	if target == "" && ev.Edge == "right" {
+	if target == "" && ev.Edge == "right" && !d.cfg.EdgeLayoutConfigured && !d.hasConfiguredEdgeTargets() {
 		// The first usable setup is a single remote: right enters it automatically.
 		targets := d.switchTargets()
 		if len(targets) == 2 {
@@ -1557,6 +1574,11 @@ func (d *Daemon) edgeTargetFor(edge string) string {
 	default:
 		return ""
 	}
+}
+
+func (d *Daemon) hasConfiguredEdgeTargets() bool {
+	targets := d.cfg.EdgeTargets
+	return targets.Left != "" || targets.Right != "" || targets.Top != "" || targets.Bottom != ""
 }
 
 func (d *Daemon) handleRemoteReturnEdge(activeTarget string, ev helper.EdgePayload) {

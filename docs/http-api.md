@@ -135,6 +135,8 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 |------|------|--------|------|
 | `GET` | `/api/shortcuts` | — | 当前快捷键配置 |
 | `PUT` | `/api/shortcuts` | 见下方 | 更新快捷键并立即推送给 helper |
+| `GET` | `/api/layout` | — | 获取控制端各屏幕边缘对应的远端设备及是否已显式设置布局 |
+| `PUT` | `/api/layout` | `{"edge_targets":{"left":"<device-id>","right":"","top":"","bottom":""}}` | 保存屏幕相对位置并立即推送给 helper；每个设备只能分配到一个边缘，保存空布局也会关闭默认右侧切换 |
 | `POST` | `/api/control/switch-next` | — | 切到下一个远端设备；没有活动远端时保持在本机 |
 | `POST` | `/api/control/switch-prev` | — | 切到上一个远端设备；没有活动远端时保持在本机 |
 | `POST` | `/api/control/switch-to-host` | — | 立即切回本机控制 |
@@ -160,6 +162,8 @@ daemon 启动后，在同一个 TCP 端口同时提供 P2P 和 HTTP API，路径
 - `controlling_remote`：当前是否处于远端控制态
 - `paused`：当前是否暂停输入转发
 - `capture_enabled`：当前本机 helper 是否采集本机键鼠事件
+
+桌面 App 的“屏幕布局”编辑器以本机屏幕为中心，支持把已连接设备拖到左、右、上、下四个方向。保存后控制端从该方向进入远端，被控端从相反边缘返回。没有显式布局时，单台远端仍默认位于本机右侧；设置任意显式布局后，只有已分配的边缘会触发自动切换。
 
 ## 调试输入接口
 

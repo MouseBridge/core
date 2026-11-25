@@ -35,6 +35,7 @@ type ConfigPushPayload struct {
 	Sessions                 []SessionInfo     `json:"sessions"`
 	Hotkeys                  map[string]string `json:"hotkeys"`
 	EdgeTargets              map[string]string `json:"edge_targets"`
+	EdgeLayoutConfigured     bool              `json:"edge_layout_configured"`
 	ActiveTarget             string            `json:"active_target"`
 	ControlledByRemote       bool              `json:"controlled_by_remote"`
 	Paused                   bool              `json:"paused"`

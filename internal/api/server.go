@@ -71,6 +71,8 @@ func (s *Server) routes(r *gin.Engine) {
 	api.PUT("/remembered/settings", s.handleRememberedSettingsPut)
 	api.GET("/shortcuts", s.handleShortcutsGet)
 	api.PUT("/shortcuts", s.handleShortcutsPut)
+	api.GET("/layout", s.handleLayoutGet)
+	api.PUT("/layout", s.handleLayoutPut)
 	api.GET("/pointer", s.handlePointerGet)
 	api.PUT("/pointer", s.handlePointerPut)
 	api.POST("/control/switch-to-host", s.handleControlSwitchToHost)

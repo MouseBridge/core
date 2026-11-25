@@ -30,6 +30,8 @@
 | `hotkeys.switch_to_host` | string | `ctrl+alt+escape` | 切换回主机的快捷键，建议保留为随手可按的紧急返回键 |
 | `hotkeys.disconnect_all` | string | `""` | 断开所有连接的快捷键 |
 | `hotkeys.toggle_pause` | string | `""` | 暂停/恢复输入转发的快捷键 |
+| `edge_targets.left/right/top/bottom` | string | 空 | 对应屏幕边缘进入的远端设备 ID；桌面 App 的“布局与快捷键”编辑器会自动维护 |
+| `edge_layout_configured` | bool | `false` | 是否已显式保存布局；旧配置默认单远端从右边缘进入，显式空布局则关闭边缘自动切换 |
 
 ## 信任设备文件
 

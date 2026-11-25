@@ -272,6 +272,63 @@ func (s *Server) handleShortcutsPut(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func (s *Server) handleLayoutGet(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"edge_targets":           s.d.Config().EdgeTargets,
+		"edge_layout_configured": s.d.Config().EdgeLayoutConfigured,
+	})
+}
+
+func (s *Server) handleLayoutPut(c *gin.Context) {
+	var req struct {
+		EdgeTargets map[string]string `json:"edge_targets"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.EdgeTargets == nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "edge_targets is required"))
+		return
+	}
+
+	next := config.EdgeTargets{}
+	assigned := make(map[string]string)
+	for edge, deviceID := range req.EdgeTargets {
+		switch edge {
+		case "left", "right", "top", "bottom":
+		default:
+			c.JSON(http.StatusBadRequest, apiErr("invalid_request", "edge must be left, right, top, or bottom"))
+			return
+		}
+		deviceID = strings.TrimSpace(deviceID)
+		if deviceID == "" {
+			continue
+		}
+		if err := validate.DeviceID(deviceID); err != nil {
+			c.JSON(http.StatusBadRequest, apiErr("invalid_request", "edge target must be a valid device ID"))
+			return
+		}
+		if previous, exists := assigned[deviceID]; exists {
+			c.JSON(http.StatusBadRequest, apiErr("invalid_request", fmt.Sprintf("device is assigned to both %s and %s edges", previous, edge)))
+			return
+		}
+		assigned[deviceID] = edge
+		switch edge {
+		case "left":
+			next.Left = deviceID
+		case "right":
+			next.Right = deviceID
+		case "top":
+			next.Top = deviceID
+		case "bottom":
+			next.Bottom = deviceID
+		}
+	}
+
+	if err := s.d.UpdateEdgeTargets(next); err != nil {
+		c.JSON(http.StatusInternalServerError, apiErr("internal_error", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "edge_targets": next, "edge_layout_configured": true})
+}
+
 func (s *Server) handlePointerGet(c *gin.Context) {
 	mouseSpeed, scrollSpeed := s.d.PointerSpeeds()
 	shakeEnabled, shakeSens := s.d.ShakeToLocateConfig()
