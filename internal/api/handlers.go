@@ -433,6 +433,22 @@ func (s *Server) handleControlCapturePut(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "capture_enabled": enabled})
 }
 
+func (s *Server) handleKeepAwakePut(c *gin.Context) {
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "enabled is required"))
+		return
+	}
+	status, err := s.d.UpdateKeepAwakeEnabled(*req.Enabled)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("keep_awake_unavailable", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, status)
+}
+
 func (s *Server) handleHelperInput(c *gin.Context) {
 	var req helper.InputPayload
 	if err := c.ShouldBindJSON(&req); err != nil {

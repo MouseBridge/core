@@ -20,6 +20,7 @@ type Config struct {
 
 	RememberedEnabled            bool `json:"remembered_enabled"`
 	RememberedAutoConnectEnabled bool `json:"remembered_auto_connect_enabled"`
+	KeepAwakeEnabled             bool `json:"keep_awake_enabled"`
 
 	PairingPINTTLSeconds  int `json:"pairing_pin_ttl_seconds"`
 	PairingPINMaxAttempts int `json:"pairing_pin_max_attempts"`

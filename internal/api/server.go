@@ -81,6 +81,7 @@ func (s *Server) routes(r *gin.Engine) {
 	api.POST("/control/disconnect-all", s.handleControlDisconnectAll)
 	api.POST("/control/toggle-pause", s.handleControlTogglePause)
 	api.PUT("/control/capture", s.handleControlCapturePut)
+	api.PUT("/power/keep-awake", s.handleKeepAwakePut)
 	api.POST("/helper/input", s.handleHelperInput)
 	api.POST("/helper/input/batch", s.handleHelperInputBatch)
 	api.POST("/session/input", s.handleSessionInput)

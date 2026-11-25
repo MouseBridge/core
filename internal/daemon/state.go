@@ -37,17 +37,18 @@ type DaemonInfo struct {
 
 // StatusSnapshot is the full status returned by GET /api/status and the SSE status event.
 type StatusSnapshot struct {
-	Daemon                       DaemonInfo          `json:"daemon"`
-	Listening                    bool                `json:"listening"`
-	ListenAddr                   string              `json:"listen_addr,omitempty"`
-	Sessions                     []SessionStatus     `json:"sessions"`
-	PendingPairs                 []PendingPairStatus `json:"pending_pairs"`
-	RememberedDevices            []remembered.DTO    `json:"remembered_devices"`
-	HelperRuntime                localhelper.Status  `json:"helper_runtime"`
-	ActiveTargetID               string              `json:"active_target_device_id"`
-	ControllingRemote            bool                `json:"controlling_remote"`
-	Paused                       bool                `json:"paused"`
-	CaptureEnabled               bool                `json:"capture_enabled"`
+	Daemon                       DaemonInfo           `json:"daemon"`
+	Listening                    bool                 `json:"listening"`
+	ListenAddr                   string               `json:"listen_addr,omitempty"`
+	Sessions                     []SessionStatus      `json:"sessions"`
+	PendingPairs                 []PendingPairStatus  `json:"pending_pairs"`
+	RememberedDevices            []remembered.DTO     `json:"remembered_devices"`
+	HelperRuntime                localhelper.Status   `json:"helper_runtime"`
+	ActiveTargetID               string               `json:"active_target_device_id"`
+	ControllingRemote            bool                 `json:"controlling_remote"`
+	Paused                       bool                 `json:"paused"`
+	CaptureEnabled               bool                 `json:"capture_enabled"`
+	KeepAwake                    KeepAwakeStatus      `json:"keep_awake"`
 	RememberedAutoConnectEnabled bool                 `json:"remembered_auto_connect_enabled"`
 	UnsafeHTTPLAN                bool                 `json:"unsafe_http_lan"`
 	Clipboard                    ClipboardStatus      `json:"clipboard"`
@@ -140,6 +141,7 @@ func (d *Daemon) stateSnapshot(includeDisplayPIN bool) StatusSnapshot {
 		ControllingRemote:            activeTarget != "" && activeTarget != id.DeviceID,
 		Paused:                       paused,
 		CaptureEnabled:               captureEnabled,
+		KeepAwake:                    d.KeepAwakeStatusSnapshot(),
 		RememberedAutoConnectEnabled: d.cfg.RememberedAutoConnectEnabled,
 		UnsafeHTTPLAN:                d.cfg.UnsafeHTTPLAN,
 		Clipboard:                    d.ClipboardStatusSnapshot(),

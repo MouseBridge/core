@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -76,6 +77,10 @@ type Daemon struct {
 
 	clipMu     sync.RWMutex
 	clipStatus ClipboardStatus
+
+	wakeMu     sync.Mutex
+	wakeCmd    *exec.Cmd
+	wakeStatus KeepAwakeStatus
 
 	fileMu          sync.Mutex
 	fileDownloadDir string
@@ -260,6 +265,11 @@ func (d *Daemon) Start() error {
 
 	go transport.Serve(ln, d.handleP2P, d.handleHTTP)
 	go d.runClipboardWatcher(ctx)
+	if d.cfg.KeepAwakeEnabled {
+		if _, err := d.applyKeepAwake(true); err != nil {
+			log.Warnf("[daemon] keep-awake request unavailable: %v", err)
+		}
+	}
 
 	d.broadcast(BusEvent{Kind: "listening"})
 	d.helper.BroadcastConfig()
@@ -296,6 +306,7 @@ func (d *Daemon) Stop() {
 	if d.cancel != nil {
 		d.cancel()
 	}
+	d.stopKeepAwake()
 	if d.helper != nil {
 		d.helper.Stop()
 	}
