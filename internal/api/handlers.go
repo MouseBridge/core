@@ -629,6 +629,72 @@ func (s *Server) handleClipboardSend(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "clipboard": status})
 }
 
+func (s *Server) handleClipboardHistoryGet(c *gin.Context) {
+	c.JSON(http.StatusOK, s.d.ClipboardHistorySnapshot())
+}
+
+func (s *Server) handleClipboardHistorySettingsPut(c *gin.Context) {
+	var req struct {
+		Enabled *bool `json:"enabled"`
+		Limit   *int  `json:"limit"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "enabled is required"))
+		return
+	}
+	limit := s.d.Config().ClipboardHistoryLimit
+	if req.Limit != nil {
+		limit = *req.Limit
+	}
+	status, err := s.d.UpdateClipboardHistorySettings(*req.Enabled, limit)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("clipboard_history_settings_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, status)
+}
+
+func (s *Server) handleClipboardHistoryClear(c *gin.Context) {
+	if err := s.d.ClearClipboardHistory(); err != nil {
+		c.JSON(http.StatusInternalServerError, apiErr("clipboard_history_clear_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleClipboardHistoryPaste(c *gin.Context) {
+	entryID := c.Param("entry_id")
+	if err := validate.SafeString(entryID); err != nil || entryID == "" {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "entry_id is invalid"))
+		return
+	}
+	if err := s.d.PasteClipboardHistory(entryID); err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("clipboard_history_paste_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"ok": true})
+}
+
+func (s *Server) handleQuickTextGet(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"entries": s.d.QuickTextEntries()})
+}
+
+func (s *Server) handleQuickTextPut(c *gin.Context) {
+	var req struct {
+		Entries []config.QuickText `json:"entries"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Entries == nil {
+		c.JSON(http.StatusBadRequest, apiErr("invalid_request", "entries is required"))
+		return
+	}
+	entries, err := s.d.UpdateQuickTexts(req.Entries)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apiErr("quick_text_update_failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"entries": entries})
+}
+
 func (s *Server) handleFilesGet(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"download_dir": s.d.FileDownloadDir(),

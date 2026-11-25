@@ -50,6 +50,7 @@ type ConfigPushPayload struct {
 	ShakeToLocateSensitivity string            `json:"shake_to_locate_sensitivity"`
 	ClipboardEnabled         bool              `json:"clipboard_enabled"`
 	ClipboardAllowServerSync bool              `json:"clipboard_allow_server_sync"`
+	ClipboardHistoryEnabled  bool              `json:"clipboard_history_enabled"`
 }
 
 // DaemonInfo identifies the local daemon the helper is attached to.
@@ -96,12 +97,14 @@ type InputPayload struct {
 
 // ClipboardPayload carries supported native clipboard representations.
 type ClipboardPayload struct {
-	Text          string               `json:"text,omitempty"`
-	HTML          string               `json:"html,omitempty"`
-	ImageBase64   string               `json:"image_base64,omitempty"`
-	ImageMIMEType string               `json:"image_mime_type,omitempty"`
-	Files         []ClipboardLocalFile `json:"files,omitempty"`
-	ContentSHA    string               `json:"content_sha,omitempty"`
+	Text            string               `json:"text,omitempty"`
+	HTML            string               `json:"html,omitempty"`
+	ImageBase64     string               `json:"image_base64,omitempty"`
+	ImageMIMEType   string               `json:"image_mime_type,omitempty"`
+	Files           []ClipboardLocalFile `json:"files,omitempty"`
+	Sensitive       bool                 `json:"sensitive,omitempty"`
+	PasteAfterWrite bool                 `json:"paste_after_write,omitempty"`
+	ContentSHA      string               `json:"content_sha,omitempty"`
 }
 
 // ClipboardLocalFile is a path on the local machine and is never sent over P2P.

@@ -78,6 +78,12 @@ type Daemon struct {
 	clipMu     sync.RWMutex
 	clipStatus ClipboardStatus
 
+	historyMu      sync.Mutex
+	historyEntries []ClipboardHistoryEntry
+	historyLoaded  bool
+	historyError   string
+	historyKey     []byte
+
 	wakeMu     sync.Mutex
 	wakeCmd    *exec.Cmd
 	wakeStatus KeepAwakeStatus
@@ -616,9 +622,46 @@ func (d *Daemon) DataDir() string { return d.dataDir }
 
 // UpdateHotkeys replaces the daemon hotkeys, persists them, and pushes them to helpers.
 func (d *Daemon) UpdateHotkeys(h config.Hotkeys) error {
+	hotkeys := map[string]string{
+		"switch_next":       h.SwitchNext,
+		"switch_prev":       h.SwitchPrev,
+		"switch_to_host":    h.SwitchToHost,
+		"disconnect_all":    h.DisconnectAll,
+		"toggle_pause":      h.TogglePause,
+		"clipboard_history": h.ClipboardHistory,
+	}
+	used := make(map[string]string, len(hotkeys)+len(d.cfg.QuickTexts))
+	for name, combo := range hotkeys {
+		if strings.TrimSpace(combo) == "" {
+			continue
+		}
+		sig, err := normalizeHotkey(combo)
+		if err != nil {
+			return fmt.Errorf("shortcut %s: %w", name, err)
+		}
+		if owner, exists := used[sig]; exists {
+			return fmt.Errorf("shortcut %s conflicts with %s", name, owner)
+		}
+		used[sig] = name
+	}
+	for _, entry := range d.cfg.QuickTexts {
+		if strings.TrimSpace(entry.Hotkey) == "" {
+			continue
+		}
+		sig, err := normalizeHotkey(entry.Hotkey)
+		if err != nil {
+			return fmt.Errorf("quick-text %q: %w", entry.Name, err)
+		}
+		if owner, exists := used[sig]; exists {
+			return fmt.Errorf("quick-text %q hotkey conflicts with %s", entry.Name, owner)
+		}
+		used[sig] = entry.Name
+	}
+	previous := d.cfg.Hotkeys
 	d.cfg.Hotkeys = h
 	if d.configPath != "" {
 		if err := d.cfg.Save(d.configPath); err != nil {
+			d.cfg.Hotkeys = previous
 			return err
 		}
 	}
@@ -958,6 +1001,19 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 	mouseSpeed, scrollSpeed := d.PointerSpeeds()
 	shakeEnabled, shakeSens := d.ShakeToLocateConfig()
 	activeTarget := d.ctrl.ActiveTarget()
+	hotkeys := map[string]string{
+		"switch_next":       d.cfg.Hotkeys.SwitchNext,
+		"switch_prev":       d.cfg.Hotkeys.SwitchPrev,
+		"switch_to_host":    d.cfg.Hotkeys.SwitchToHost,
+		"disconnect_all":    d.cfg.Hotkeys.DisconnectAll,
+		"toggle_pause":      d.cfg.Hotkeys.TogglePause,
+		"clipboard_history": d.cfg.Hotkeys.ClipboardHistory,
+	}
+	for _, entry := range d.cfg.QuickTexts {
+		if entry.ID != "" && entry.Hotkey != "" {
+			hotkeys["quick_text_"+entry.ID] = entry.Hotkey
+		}
+	}
 	d.controlMu.RLock()
 	controlledByRemote := d.remotePeer != ""
 	d.controlMu.RUnlock()
@@ -969,13 +1025,7 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 			Name:      d.identity.Name,
 		},
 		Sessions: sessions,
-		Hotkeys: map[string]string{
-			"switch_next":    d.cfg.Hotkeys.SwitchNext,
-			"switch_prev":    d.cfg.Hotkeys.SwitchPrev,
-			"switch_to_host": d.cfg.Hotkeys.SwitchToHost,
-			"disconnect_all": d.cfg.Hotkeys.DisconnectAll,
-			"toggle_pause":   d.cfg.Hotkeys.TogglePause,
-		},
+		Hotkeys:  hotkeys,
 		EdgeTargets: map[string]string{
 			"left":   d.cfg.EdgeTargets.Left,
 			"right":  d.cfg.EdgeTargets.Right,
@@ -993,6 +1043,7 @@ func (d *Daemon) helperConfigSnapshot() helper.ConfigPushPayload {
 		ShakeToLocateSensitivity: shakeSens,
 		ClipboardEnabled:         d.ClipboardStatusSnapshot().Enabled,
 		ClipboardAllowServerSync: d.ClipboardStatusSnapshot().AllowServerSync,
+		ClipboardHistoryEnabled:  d.cfg.ClipboardHistoryEnabled,
 	}
 }
 
@@ -1008,6 +1059,12 @@ func (d *Daemon) handleHelperHotkey(ev helper.HotkeyPayload) {
 		d.disconnectAll()
 	case "toggle_pause":
 		d.togglePause()
+	case "clipboard_history":
+		d.broadcast(BusEvent{Kind: "clipboard_history_requested"})
+	default:
+		if strings.HasPrefix(ev.Action, "quick_text_") {
+			d.triggerQuickText(strings.TrimPrefix(ev.Action, "quick_text_"))
+		}
 	}
 	d.broadcast(BusEvent{
 		Kind: "log",

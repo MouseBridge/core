@@ -23,6 +23,8 @@ type Config struct {
 	KeepAwakeEnabled             bool `json:"keep_awake_enabled"`
 	ClipboardSyncEnabled         bool `json:"clipboard_sync_enabled"`
 	ClipboardAllowServerSync     bool `json:"clipboard_allow_server_sync"`
+	ClipboardHistoryEnabled      bool `json:"clipboard_history_enabled"`
+	ClipboardHistoryLimit        int  `json:"clipboard_history_limit"`
 
 	PairingPINTTLSeconds  int `json:"pairing_pin_ttl_seconds"`
 	PairingPINMaxAttempts int `json:"pairing_pin_max_attempts"`
@@ -34,6 +36,7 @@ type Config struct {
 	ShakeToLocateEnabled  bool        `json:"shake_to_locate_enabled"`
 	ShakeSensitivity      string      `json:"shake_sensitivity"`
 	Hotkeys               Hotkeys     `json:"hotkeys"`
+	QuickTexts            []QuickText `json:"quick_texts,omitempty"`
 	EdgeTargets           EdgeTargets `json:"edge_targets"`
 	EdgeLayoutConfigured  bool        `json:"edge_layout_configured,omitempty"`
 
@@ -43,11 +46,24 @@ type Config struct {
 
 // Hotkeys holds configurable key bindings.
 type Hotkeys struct {
-	SwitchNext    string `json:"switch_next"`
-	SwitchPrev    string `json:"switch_prev"`
-	SwitchToHost  string `json:"switch_to_host"`
-	DisconnectAll string `json:"disconnect_all"`
-	TogglePause   string `json:"toggle_pause"`
+	SwitchNext       string `json:"switch_next"`
+	SwitchPrev       string `json:"switch_prev"`
+	SwitchToHost     string `json:"switch_to_host"`
+	DisconnectAll    string `json:"disconnect_all"`
+	TogglePause      string `json:"toggle_pause"`
+	ClipboardHistory string `json:"clipboard_history"`
+}
+
+// QuickText stores a fixed text snippet and its optional global hotkey.
+// Sensitive snippets keep their value in the macOS Keychain instead of config.json.
+type QuickText struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Text        string `json:"text,omitempty"`
+	Hotkey      string `json:"hotkey,omitempty"`
+	AppendEnter bool   `json:"append_enter,omitempty"`
+	Sensitive   bool   `json:"sensitive,omitempty"`
+	HasSecret   bool   `json:"has_secret,omitempty"`
 }
 
 // EdgeTargets maps local screen edges to remembered/connected remote device IDs.
@@ -68,6 +84,7 @@ func Default() *Config {
 		RememberedAutoConnectEnabled: true,
 		ClipboardSyncEnabled:         true,
 		ClipboardAllowServerSync:     true,
+		ClipboardHistoryLimit:        50,
 		PairingPINTTLSeconds:         120,
 		PairingPINMaxAttempts:        3,
 		ConnectTimeoutSeconds:        5,
@@ -77,11 +94,12 @@ func Default() *Config {
 		ShakeToLocateEnabled:         true,
 		ShakeSensitivity:             "4",
 		Hotkeys: Hotkeys{
-			SwitchNext:    "ctrl+alt+right",
-			SwitchPrev:    "ctrl+alt+left",
-			SwitchToHost:  "ctrl+alt+escape",
-			DisconnectAll: "ctrl+alt+backspace",
-			TogglePause:   "ctrl+alt+p",
+			SwitchNext:       "ctrl+alt+right",
+			SwitchPrev:       "ctrl+alt+left",
+			SwitchToHost:     "ctrl+alt+escape",
+			DisconnectAll:    "ctrl+alt+backspace",
+			TogglePause:      "ctrl+alt+p",
+			ClipboardHistory: "ctrl+alt+v",
 		},
 		DeviceName: hostname(),
 	}
@@ -158,6 +176,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Hotkeys.TogglePause == "" {
 		cfg.Hotkeys.TogglePause = Default().Hotkeys.TogglePause
+	}
+	if cfg.Hotkeys.ClipboardHistory == "" {
+		cfg.Hotkeys.ClipboardHistory = Default().Hotkeys.ClipboardHistory
+	}
+	if cfg.ClipboardHistoryLimit <= 0 {
+		cfg.ClipboardHistoryLimit = Default().ClipboardHistoryLimit
 	}
 	if cfg.MouseSpeed <= 0 {
 		cfg.MouseSpeed = Default().MouseSpeed

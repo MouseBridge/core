@@ -52,6 +52,7 @@ type StatusSnapshot struct {
 	RememberedAutoConnectEnabled bool                 `json:"remembered_auto_connect_enabled"`
 	UnsafeHTTPLAN                bool                 `json:"unsafe_http_lan"`
 	Clipboard                    ClipboardStatus      `json:"clipboard"`
+	ClipboardHistoryEnabled      bool                 `json:"clipboard_history_enabled"`
 	FileTransfers                []FileTransferStatus `json:"file_transfers"`
 	FileDownloadDir              string               `json:"file_download_dir"`
 	MouseSpeed                   float64              `json:"mouse_speed"`
@@ -145,6 +146,7 @@ func (d *Daemon) stateSnapshot(includeDisplayPIN bool) StatusSnapshot {
 		RememberedAutoConnectEnabled: d.cfg.RememberedAutoConnectEnabled,
 		UnsafeHTTPLAN:                d.cfg.UnsafeHTTPLAN,
 		Clipboard:                    d.ClipboardStatusSnapshot(),
+		ClipboardHistoryEnabled:      d.cfg.ClipboardHistoryEnabled,
 		FileTransfers:                d.FileTransfersSnapshot(),
 		FileDownloadDir:              d.FileDownloadDir(),
 		MouseSpeed:                   mouseSpeed,

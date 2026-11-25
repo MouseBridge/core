@@ -109,6 +109,12 @@ func (s *Server) routes(r *gin.Engine) {
 	local.POST("/lab/stop", s.handleLocalLabStop)
 	local.POST("/validation/run", s.handleLocalValidationRun)
 	local.POST("/validation/stop", s.handleLocalValidationStop)
+	local.GET("/clipboard/history", s.handleClipboardHistoryGet)
+	local.PUT("/clipboard/history/settings", s.handleClipboardHistorySettingsPut)
+	local.DELETE("/clipboard/history", s.handleClipboardHistoryClear)
+	local.POST("/clipboard/history/:entry_id/paste", s.handleClipboardHistoryPaste)
+	local.GET("/quick-text", s.handleQuickTextGet)
+	local.PUT("/quick-text", s.handleQuickTextPut)
 }
 
 func (s *Server) fanOutEvents() {
@@ -176,6 +182,8 @@ func bodyLimitMiddleware(limit int64) gin.HandlerFunc {
 			maxBytes = 128 * 1024 * 1024 // 128 MB for file upload
 		} else if strings.HasPrefix(c.Request.URL.Path, "/api/clipboard/") {
 			maxBytes = 4 * 1024 * 1024 // 4 MB for clipboard text
+		} else if c.Request.URL.Path == "/api/local/quick-text" {
+			maxBytes = 2 * 1024 * 1024 // Supports the configured quick-text entry and content limits.
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 		c.Next()

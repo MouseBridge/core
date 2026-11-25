@@ -246,11 +246,23 @@ func (d *Daemon) SendClipboardEntry(targetDeviceID string, payload event.Clipboa
 func clipboardEntrySHA(payload event.ClipboardSyncPayload) string {
 	payload.ContentSHA = ""
 	payload.SourceID = ""
+	payload.PasteAfterWrite = false
 	for i := range payload.Files {
 		payload.Files[i].TransferID = ""
 	}
 	data, _ := json.Marshal(payload)
 	return sha256Hex(data)
+}
+
+func (d *Daemon) sessionDeviceName(deviceID string) string {
+	d.sessMu.RLock()
+	defer d.sessMu.RUnlock()
+	for _, session := range d.sessions {
+		if session.DeviceID == deviceID {
+			return session.Name
+		}
+	}
+	return deviceID
 }
 
 func clipboardFormats(payload event.ClipboardSyncPayload) []string {
@@ -272,6 +284,10 @@ func clipboardFormats(payload event.ClipboardSyncPayload) []string {
 
 // HandleLocalClipboard accepts native clipboard changes reported by the macOS helper.
 func (d *Daemon) HandleLocalClipboard(payload helper.ClipboardPayload) {
+	if payload.Sensitive {
+		return
+	}
+	d.recordClipboardHistory(payload, d.identity.DeviceID, d.identity.Name)
 	base := event.ClipboardSyncPayload{
 		Text:          payload.Text,
 		HTML:          payload.HTML,
@@ -423,12 +439,21 @@ func (d *Daemon) HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncP
 	}
 	pay.Text = cleanText
 	sha := clipboardEntrySHA(pay)
-	d.clipMu.RLock()
-	allowed := d.clipStatus.Enabled && d.clipStatus.AllowServerSync
-	duplicate := d.clipStatus.LastSHA256 == sha || d.clipStatus.lastSystemWriteSHA == sha
-	d.clipMu.RUnlock()
-	if !allowed || duplicate {
-		return
+	if pay.PasteAfterWrite {
+		d.controlMu.RLock()
+		isActiveController := d.remotePeer == deviceID
+		d.controlMu.RUnlock()
+		if !isActiveController || len(pay.Files) > 0 || pay.ImageBase64 != "" {
+			return
+		}
+	} else {
+		d.clipMu.RLock()
+		allowed := d.clipStatus.Enabled && d.clipStatus.AllowServerSync
+		duplicate := d.clipStatus.LastSHA256 == sha || d.clipStatus.lastSystemWriteSHA == sha
+		d.clipMu.RUnlock()
+		if !allowed || duplicate {
+			return
+		}
 	}
 	localFiles := make([]helper.ClipboardLocalFile, 0, len(pay.Files))
 	for _, file := range pay.Files {
@@ -453,13 +478,13 @@ func (d *Daemon) HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncP
 		return
 	}
 	d.clipMu.Lock()
-	if !d.clipStatus.Enabled || !d.clipStatus.AllowServerSync {
+	if !pay.PasteAfterWrite && (!d.clipStatus.Enabled || !d.clipStatus.AllowServerSync) {
 		d.clipMu.Unlock()
 		return
 	}
 	// Anti-loop guard: ignore if content hash matches the last synced clipboard.
-	if (d.clipStatus.LastSHA256 != "" && d.clipStatus.LastSHA256 == sha) ||
-		(d.clipStatus.lastSystemWriteSHA != "" && d.clipStatus.lastSystemWriteSHA == sha) {
+	if !pay.PasteAfterWrite && ((d.clipStatus.LastSHA256 != "" && d.clipStatus.LastSHA256 == sha) ||
+		(d.clipStatus.lastSystemWriteSHA != "" && d.clipStatus.lastSystemWriteSHA == sha)) {
 		d.clipMu.Unlock()
 		return
 	}
@@ -471,15 +496,19 @@ func (d *Daemon) HandleRemoteClipboard(deviceID string, pay event.ClipboardSyncP
 	d.clipStatus.LastSourceID = deviceID
 	d.clipStatus.UpdatedAt = time.Now().UnixMilli()
 	d.clipMu.Unlock()
+	if !pay.PasteAfterWrite {
+		d.recordClipboardHistory(helper.ClipboardPayload{Text: pay.Text, HTML: pay.HTML}, deviceID, d.sessionDeviceName(deviceID))
+	}
 
 	if runtime.GOOS == "darwin" && d.helper != nil {
 		d.helper.BroadcastClipboard(helper.ClipboardPayload{
-			Text:          pay.Text,
-			HTML:          pay.HTML,
-			ImageBase64:   pay.ImageBase64,
-			ImageMIMEType: pay.ImageMIMEType,
-			Files:         localFiles,
-			ContentSHA:    sha,
+			Text:            pay.Text,
+			HTML:            pay.HTML,
+			ImageBase64:     pay.ImageBase64,
+			ImageMIMEType:   pay.ImageMIMEType,
+			Files:           localFiles,
+			ContentSHA:      sha,
+			PasteAfterWrite: pay.PasteAfterWrite,
 		})
 	}
 

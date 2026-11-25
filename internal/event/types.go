@@ -181,13 +181,14 @@ type SwitchBackPayload struct {
 
 // ClipboardSyncPayload carries text clipboard content across a P2P session.
 type ClipboardSyncPayload struct {
-	Text          string          `json:"text,omitempty"`
-	HTML          string          `json:"html,omitempty"`
-	ImageBase64   string          `json:"image_base64,omitempty"`
-	ImageMIMEType string          `json:"image_mime_type,omitempty"`
-	Files         []ClipboardFile `json:"files,omitempty"`
-	ContentSHA    string          `json:"content_sha"`
-	SourceID      string          `json:"source_id,omitempty"`
+	Text            string          `json:"text,omitempty"`
+	HTML            string          `json:"html,omitempty"`
+	ImageBase64     string          `json:"image_base64,omitempty"`
+	ImageMIMEType   string          `json:"image_mime_type,omitempty"`
+	Files           []ClipboardFile `json:"files,omitempty"`
+	PasteAfterWrite bool            `json:"paste_after_write,omitempty"`
+	ContentSHA      string          `json:"content_sha"`
+	SourceID        string          `json:"source_id,omitempty"`
 }
 
 // ClipboardFile refers to a file already transferred in the same P2P session.
